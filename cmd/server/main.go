@@ -1,0 +1,60 @@
+package main
+
+import (
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"my-tool-go/internal/config"
+	"my-tool-go/internal/loader"
+	"my-tool-go/internal/service"
+)
+
+func main() {
+	// Load configuration
+	config.Load()
+
+	log.Println("🔧 Initializing services...")
+
+	// Initialize services
+	binanceService := service.NewBinanceService()
+	strategyService := service.NewStrategyService(binanceService)
+	aiService := service.NewAIService()
+
+	telegramService, err := service.NewTelegramService()
+	if err != nil {
+		log.Fatalf("❌ Failed to initialize Telegram service: %v", err)
+	}
+
+	databaseService, err := service.NewDatabaseService()
+	if err != nil {
+		log.Fatalf("❌ Failed to initialize Database service: %v", err)
+	}
+	defer databaseService.Close()
+
+	log.Println("✅ All services initialized successfully\n")
+
+	// Create and start loader
+	loaderService := loader.NewLoader(
+		binanceService,
+		strategyService,
+		aiService,
+		telegramService,
+		databaseService,
+	)
+
+	// Handle graceful shutdown
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+
+		log.Println("\n🛑 Received shutdown signal...")
+		databaseService.Close()
+		os.Exit(0)
+	}()
+
+	// Start the loader (blocks indefinitely)
+	loaderService.Start()
+}
