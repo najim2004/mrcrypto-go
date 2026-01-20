@@ -249,6 +249,7 @@ func createSignal(symbol string, signalType model.SignalType, tier model.SignalT
 		TakeProfit:       takeProfit,
 		Regime:           string(regime),
 		TechnicalContext: techContext,
+		Status:           "ACTIVE",
 		Timestamp:        time.Now(),
 	}
 }

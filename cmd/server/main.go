@@ -22,7 +22,7 @@ func main() {
 	strategyService := service.NewStrategyService(binanceService)
 	aiService := service.NewAIService()
 
-	telegramService, err := service.NewTelegramService()
+	telegramService, err := service.NewTelegramService(binanceService)
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize Telegram service: %v", err)
 	}

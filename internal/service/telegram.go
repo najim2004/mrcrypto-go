@@ -20,51 +20,45 @@ type TelegramService struct {
 	bot        *tgbotapi.BotAPI
 	chatID     int64
 	collection *mongo.Collection
+	binance    *BinanceService
 }
 
-func NewTelegramService() (*TelegramService, error) {
+func NewTelegramService(binanceService *BinanceService) (*TelegramService, error) {
 	bot, err := tgbotapi.NewBotAPI(config.AppConfig.TelegramBotToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
 	}
 
-	// Parse chat ID
-	var chatID int64
-	fmt.Sscanf(config.AppConfig.TelegramChatID, "%d", &chatID)
+	log.Printf("✅ Telegram bot authorized: %s", bot.Self.UserName)
 
-	log.Println("✅ Telegram bot authorized:", bot.Self.UserName)
-
-	// Connect to MongoDB for /today command
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(config.AppConfig.MongoURI))
+	// MongoDB connection for /today command
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(config.AppConfig.MongoURI))
 	if err != nil {
-		log.Printf("⚠️  MongoDB connection for Telegram failed: %v", err)
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 
-	collection := client.Database("trading-signals").Collection("signals")
+	collection := client.Database("mrcrypto").Collection("signals")
 
 	service := &TelegramService{
 		bot:        bot,
-		chatID:     chatID,
+		chatID:     parseChatID(config.AppConfig.TelegramChatID),
 		collection: collection,
+		binance:    binanceService,
 	}
 
 	// Start command handler in background
 	go service.handleCommands()
+	log.Println("✅ Telegram command handler started")
 
 	return service, nil
 }
 
-// handleCommands listens for and handles telegram commands
+// handleCommands listens for and processes Telegram commands
 func (s *TelegramService) handleCommands() {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
 	updates := s.bot.GetUpdatesChan(u)
-
-	log.Println("✅ Telegram command handler started")
 
 	for update := range updates {
 		if update.Message == nil {
@@ -80,13 +74,32 @@ func (s *TelegramService) handleCommands() {
 
 		switch command {
 		case "start":
+			log.Println("📱 /start command executed")
 			s.handleStart(chatID)
 		case "status":
+			log.Println("📱 /status command executed")
 			s.handleStatus(chatID)
 		case "today":
+			log.Println("📱 /today command executed")
 			s.handleToday(chatID)
 		case "help":
+			log.Println("📱 /help command executed")
 			s.handleHelp(chatID)
+		case "active":
+			log.Println("📱 /active command executed")
+			s.handleActive(update.Message)
+		case "pnl":
+			log.Println("📱 /pnl command executed")
+			s.handlePnL(update.Message)
+		case "stats":
+			log.Println("📱 /stats command executed")
+			s.handleStats(update.Message)
+		case "closed":
+			log.Println("📱 /closed command executed")
+			s.handleClosed(update.Message)
+		case "price":
+			log.Println("📱 /price command executed")
+			s.handlePrice(update.Message)
 		default:
 			msg := tgbotapi.NewMessage(chatID, "Unknown command. Use /help to see available commands.")
 			s.bot.Send(msg)
@@ -94,74 +107,72 @@ func (s *TelegramService) handleCommands() {
 	}
 }
 
+// handleStart sends welcome message
 func (s *TelegramService) handleStart(chatID int64) {
-	message := `🚀 *Crypto Signal Generator Bot*
+	message := `🚀 <b>Welcome to MrCrypto Trading Bot!</b>
 
-I provide 1-3 high-confidence crypto trading signals daily.
+আমি আপনার জন্য প্রিমিয়াম ট্রেডিং সিগন্যাল generate করি।
 
-*Available Commands:*
-/status - Bot and system status
-/today - View today's signals
-/help - Help and information`
+<b>Features:</b>
+✅ AI-powered signal validation
+✅ Multi-timeframe analysis
+✅ Real-time market monitoring
+✅ Bangla notifications
+
+<b>Commands:</b>
+/help - সব command দেখুন
+/active - Active signals
+/stats - Performance stats
+
+শুভকামনা! 🎯`
 
 	msg := tgbotapi.NewMessage(chatID, message)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = "HTML"
 	s.bot.Send(msg)
-	log.Println("📱 /start command executed")
 }
 
+// handleStatus sends bot status
 func (s *TelegramService) handleStatus(chatID int64) {
-	message := `📊 *System Status*
+	message := `✅ <b>Bot Status</b>
 
-✅ Bot: Active
-✅ Database: Connected
-✅ AI Models: Multi-model fallback ready
-⏱️ Polling Interval: 1 minute
-🎯 Min Score Threshold: 70/100
+🟢 <b>Status:</b> Online
+🤖 <b>AI Models:</b> Active
+📊 <b>Market Monitoring:</b> Live
+⏰ <b>Polling:</b> Every 1 minute
 
-*Models:*
-• gemini-3-pro-preview
-• gemini-3-flash-preview
-• gemini-2.5-flash
-• gemini-2.5-flash-lite
-• gemini-2.5-pro
-
-System running normally 🚀`
+সব কিছু ঠিকঠাক চলছে! 🚀`
 
 	msg := tgbotapi.NewMessage(chatID, message)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = "HTML"
 	s.bot.Send(msg)
-	log.Println("📱 /status command executed")
 }
 
+// handleToday sends today's signals
 func (s *TelegramService) handleToday(chatID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Get today's signals
 	today := time.Now().Truncate(24 * time.Hour)
-
-	filter := bson.M{
+	cursor, err := s.collection.Find(ctx, bson.M{
 		"created_at": bson.M{"$gte": today},
-	}
+	})
 
-	cursor, err := s.collection.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}))
 	if err != nil {
-		msg := tgbotapi.NewMessage(chatID, "❌ Error fetching today's signals")
+		msg := tgbotapi.NewMessage(chatID, "❌ Failed to fetch today's signals")
 		s.bot.Send(msg)
 		return
 	}
 	defer cursor.Close(ctx)
 
 	var signals []model.Signal
-	if err = cursor.All(ctx, &signals); err != nil {
-		msg := tgbotapi.NewMessage(chatID, "❌ Error processing signals")
+	if err := cursor.All(ctx, &signals); err != nil {
+		msg := tgbotapi.NewMessage(chatID, "❌ Failed to decode signals")
 		s.bot.Send(msg)
 		return
 	}
 
 	if len(signals) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "📭 No signals generated today yet.")
+		msg := tgbotapi.NewMessage(chatID, "📅 আজ এখনো কোন signal generate হয়নি।")
 		s.bot.Send(msg)
 		return
 	}
@@ -177,33 +188,394 @@ func (s *TelegramService) handleToday(chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, message)
 	msg.ParseMode = "Markdown"
 	s.bot.Send(msg)
-	log.Println("📱 /today command executed")
 }
 
 func (s *TelegramService) handleHelp(chatID int64) {
-	message := `ℹ️ *Help & Information*
+	message := `🤖 <b>MrCrypto Bot - Help</b>
 
-*What does this bot do?*
-I analyze Binance crypto markets and generate high-probability trading signals using technical indicators + AI.
+<b>📊 Signal Commands:</b>
+/active - সব active signals দেখুন
+/closed - Recently closed signals
+/pnl - Profit &amp; Loss summary
+/stats - Performance statistics
+/price SYMBOL - Current price check
 
-*Strategy:*
-• Multi-timeframe: 4h + 1h + 15m + 5m
-• Indicators: RSI, ADX, MACD, VWAP, Bollinger Bands
-• AI Scoring: Gemini models (multi-fallback)
-• Risk: 3:1 R:R ratio (6% TP, 2% SL)
+<b>📈 Info Commands:</b>
+/status - Bot status
+/today - আজকের signals
 
-*Commands:*
-/start - Start the bot
-/status - System status
-/today - Today's signals
-/help - This help message
+<b>❓ Help:</b>
+/start - Welcome message
+/help - এই help message
 
-⚠️ *Disclaimer:* Trading is risky. Always use proper risk management.`
+💡 <b>Tips:</b>
+• প্রতিটি signal এ trading guide দেওয়া আছে
+• Risk management অবশ্যই মানুন
+• Stop loss কখনো মুভ করবেন না
+
+যেকোনো সমস্যায় support এ যোগাযোগ করুন।`
 
 	msg := tgbotapi.NewMessage(chatID, message)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = "HTML"
 	s.bot.Send(msg)
-	log.Println("📱 /help command executed")
+}
+
+// handleActive shows all active signals
+func (s *TelegramService) handleActive(msg *tgbotapi.Message) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, err := s.collection.Find(ctx, bson.M{"status": "ACTIVE"})
+	if err != nil {
+		s.sendMessage(msg.Chat.ID, "❌ Failed to fetch active signals")
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var signals []model.Signal
+	if err := cursor.All(ctx, &signals); err != nil {
+		s.sendMessage(msg.Chat.ID, "❌ Failed to decode signals")
+		return
+	}
+
+	if len(signals) == 0 {
+		message := `📊 <b>Active Signals</b>
+
+কোন active signal নেই।
+নতুন signal এর জন্য অপেক্ষা করুন।`
+		s.sendMessage(msg.Chat.ID, message)
+		return
+	}
+
+	message := fmt.Sprintf("<b>📊 Active Signals (%d)</b>\n\n", len(signals))
+
+	for i, signal := range signals {
+		emoji := "🟢"
+		if signal.Type == model.SignalTypeShort {
+			emoji = "🔴"
+		}
+
+		message += fmt.Sprintf(`%s <b>%s - %s</b>
+Entry: %s
+TP: %s | SL: %s
+⏰ %s
+
+`, emoji, signal.Symbol, signal.Type,
+			FormatPrice(signal.EntryPrice),
+			FormatPrice(signal.TakeProfit),
+			FormatPrice(signal.StopLoss),
+			signal.Timestamp.Format("15:04, 02 Jan"))
+
+		if i >= 9 { // Limit to 10 signals
+			message += fmt.Sprintf("\n... এবং আরো %d টি signal", len(signals)-10)
+			break
+		}
+	}
+
+	s.sendMessage(msg.Chat.ID, message)
+}
+
+// handlePnL shows PnL summary
+func (s *TelegramService) handlePnL(msg *tgbotapi.Message) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Today's PnL
+	today := time.Now().Truncate(24 * time.Hour)
+	todayCursor, _ := s.collection.Find(ctx, bson.M{
+		"status":     "CLOSED",
+		"created_at": bson.M{"$gte": today},
+	})
+	defer todayCursor.Close(ctx)
+
+	var todaySignals []model.Signal
+	todayCursor.All(ctx, &todaySignals)
+
+	todayPnL, todayWins, todayLosses := 0.0, 0, 0
+	for _, sig := range todaySignals {
+		todayPnL += sig.PnL
+		if sig.PnL > 0 {
+			todayWins++
+		} else {
+			todayLosses++
+		}
+	}
+
+	// This week
+	weekStart := time.Now().AddDate(0, 0, -7)
+	weekCursor, _ := s.collection.Find(ctx, bson.M{
+		"status":     "CLOSED",
+		"created_at": bson.M{"$gte": weekStart},
+	})
+	defer weekCursor.Close(ctx)
+
+	var weekSignals []model.Signal
+	weekCursor.All(ctx, &weekSignals)
+
+	weekPnL := 0.0
+	for _, sig := range weekSignals {
+		weekPnL += sig.PnL
+	}
+
+	winRate := 0.0
+	totalTrades := todayWins + todayLosses
+	if totalTrades > 0 {
+		winRate = (float64(todayWins) / float64(totalTrades)) * 100
+	}
+
+	message := fmt.Sprintf(`💰 <b>Profit &amp; Loss Summary</b>
+
+📅 <b>Today:</b> %s%.2f%% (%d trades)
+  ✅ Wins: %d
+  ❌ Losses: %d
+  📊 Win Rate: %.1f%%
+
+📅 <b>This Week:</b> %s%.2f%% (%d trades)
+
+💡 আপনার পারফরম্যান্স দেখতে /stats ব্যবহার করুন
+`,
+		getPnLEmoji(todayPnL), todayPnL, len(todaySignals),
+		todayWins, todayLosses, winRate,
+		getPnLEmoji(weekPnL), weekPnL, len(weekSignals))
+
+	s.sendMessage(msg.Chat.ID, message)
+}
+
+// handleStats shows performance statistics
+func (s *TelegramService) handleStats(msg *tgbotapi.Message) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cursor, _ := s.collection.Find(ctx, bson.M{"status": "CLOSED"})
+	defer cursor.Close(ctx)
+
+	var allSignals []model.Signal
+	cursor.All(ctx, &allSignals)
+
+	if len(allSignals) == 0 {
+		s.sendMessage(msg.Chat.ID, "📊 এখনো কোন closed signal নেই।")
+		return
+	}
+
+	wins, losses := 0, 0
+	totalWinPnL, totalLossPnL := 0.0, 0.0
+	bestTrade, worstTrade := model.Signal{PnL: -999}, model.Signal{PnL: 999}
+
+	for _, sig := range allSignals {
+		if sig.PnL > 0 {
+			wins++
+			totalWinPnL += sig.PnL
+			if sig.PnL > bestTrade.PnL {
+				bestTrade = sig
+			}
+		} else {
+			losses++
+			totalLossPnL += sig.PnL
+			if sig.PnL < worstTrade.PnL {
+				worstTrade = sig
+			}
+		}
+	}
+
+	totalTrades := wins + losses
+	winRate := (float64(wins) / float64(totalTrades)) * 100
+	avgWin := 0.0
+	avgLoss := 0.0
+	if wins > 0 {
+		avgWin = totalWinPnL / float64(wins)
+	}
+	if losses > 0 {
+		avgLoss = totalLossPnL / float64(losses)
+	}
+
+	profitFactor := 0.0
+	if totalLossPnL != 0 {
+		profitFactor = -totalWinPnL / totalLossPnL
+	}
+
+	message := fmt.Sprintf(`📊 <b>Performance Statistics</b>
+
+🎯 <b>Win Rate:</b> %.1f%% (%d/%d)
+💎 <b>Profit Factor:</b> %.2f
+📈 <b>Average Win:</b> +%.2f%%
+📉 <b>Average Loss:</b> %.2f%%
+
+🏆 <b>Best Trade:</b> +%.2f%% (%s)
+💀 <b>Worst Trade:</b> %.2f%% (%s)
+
+📊 <b>Total Trades:</b> %d
+✅ <b>Wins:</b> %d
+❌ <b>Losses:</b> %d
+`,
+		winRate, wins, totalTrades,
+		profitFactor,
+		avgWin,
+		avgLoss,
+		bestTrade.PnL, bestTrade.Symbol,
+		worstTrade.PnL, worstTrade.Symbol,
+		totalTrades, wins, losses)
+
+	s.sendMessage(msg.Chat.ID, message)
+}
+
+// handleClosed shows recently closed signals
+func (s *TelegramService) handleClosed(msg *tgbotapi.Message) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Last 24 hours
+	yesterday := time.Now().AddDate(0, 0, -1)
+	opts := options.Find().SetSort(bson.D{{Key: "closed_at", Value: -1}}).SetLimit(10)
+
+	cursor, err := s.collection.Find(ctx, bson.M{
+		"status":    "CLOSED",
+		"closed_at": bson.M{"$gte": yesterday},
+	}, opts)
+
+	if err != nil {
+		s.sendMessage(msg.Chat.ID, "❌ Failed to fetch closed signals")
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var signals []model.Signal
+	cursor.All(ctx, &signals)
+
+	if len(signals) == 0 {
+		s.sendMessage(msg.Chat.ID, "📊 গত ২৪ ঘণ্টায় কোন signal close হয়নি।")
+		return
+	}
+
+	message := fmt.Sprintf("<b>📊 Recently Closed Signals (%d)</b>\n\n", len(signals))
+
+	for _, signal := range signals {
+		emoji := "✅"
+		if signal.PnL < 0 {
+			emoji = "❌"
+		}
+
+		reasonEmoji := ""
+		switch signal.CloseReason {
+		case "TP_HIT":
+			reasonEmoji = "🎯"
+		case "SL_HIT":
+			reasonEmoji = "🛑"
+		}
+
+		closedTime := time.Now()
+		if signal.ClosedAt != nil {
+			closedTime = *signal.ClosedAt
+		}
+
+		message += fmt.Sprintf(`%s <b>%s</b> %s%s
+PnL: %s%.2f%% | Reason: %s
+⏰ %s
+
+`, emoji, signal.Symbol, signal.Type, reasonEmoji,
+			getPnLSign(signal.PnL), signal.PnL, signal.CloseReason,
+			closedTime.Format("15:04, 02 Jan"))
+	}
+
+	s.sendMessage(msg.Chat.ID, message)
+}
+
+// handlePrice shows current price for a symbol
+func (s *TelegramService) handlePrice(msg *tgbotapi.Message) {
+	// Extract symbol from command (e.g., "/price BTCUSDT")
+	parts := strings.Fields(msg.Text)
+	if len(parts) < 2 {
+		s.sendMessage(msg.Chat.ID, `💡 <b>Usage:</b> /price BTCUSDT
+
+Example: /price ETHUSDT`)
+		return
+	}
+
+	symbol := strings.ToUpper(parts[1])
+
+	// Fetch current 1m kline data
+	klines, err := s.binance.GetKlines(symbol, "1m", 1)
+	if err != nil {
+		s.sendMessage(msg.Chat.ID, fmt.Sprintf(`❌ <b>Error</b>
+
+Failed to fetch price for %s
+Symbol টি সঠিক আছে কিনা চেক করুন।`, symbol))
+		return
+	}
+
+	if len(klines) == 0 {
+		s.sendMessage(msg.Chat.ID, fmt.Sprintf(`❌ <b>No Data</b>
+
+%s এর জন্য কোন data পাওয়া যায়নি।`, symbol))
+		return
+	}
+
+	currentPrice := klines[0].Close
+	openPrice := klines[0].Open
+	highPrice := klines[0].High
+	lowPrice := klines[0].Low
+	volume := klines[0].Volume
+
+	// Fetch 24h kline to calculate 24h change
+	klines24h, err := s.binance.GetKlines(symbol, "1d", 1)
+	change24h := 0.0
+	if err == nil && len(klines24h) > 0 {
+		price24hAgo := klines24h[0].Open
+		change24h = ((currentPrice - price24hAgo) / price24hAgo) * 100
+	}
+
+	// Determine emoji based on 24h change
+	changeEmoji := "📊"
+	if change24h > 0 {
+		changeEmoji = "📈"
+	} else if change24h < 0 {
+		changeEmoji = "📉"
+	}
+
+	message := fmt.Sprintf(`💰 <b>%s Price</b>
+
+<b>Current Price:</b> %s
+<b>24h Change:</b> %s%.2f%%
+
+━━━━━━━━━━━━━━━━━━
+<b>📊 1min Candle:</b>
+• Open: %s
+• High: %s
+• Low: %s
+• Volume: %.2f
+
+<b>Last Update:</b> %s
+`,
+		symbol,
+		FormatPrice(currentPrice),
+		changeEmoji, change24h,
+		FormatPrice(openPrice),
+		FormatPrice(highPrice),
+		FormatPrice(lowPrice),
+		volume,
+		time.Now().Format("15:04:05"))
+
+	s.sendMessage(msg.Chat.ID, message)
+}
+
+// Helper functions
+func getPnLEmoji(pnl float64) string {
+	if pnl > 0 {
+		return "🟢 +"
+	}
+	return "🔴 "
+}
+
+func getPnLSign(pnl float64) string {
+	if pnl > 0 {
+		return "+"
+	}
+	return ""
+}
+
+func (s *TelegramService) sendMessage(chatID int64, message string) {
+	msg := tgbotapi.NewMessage(chatID, message)
+	msg.ParseMode = "HTML"
+	s.bot.Send(msg)
 }
 
 // SendSignal sends a trading signal notification to Telegram
@@ -219,6 +591,19 @@ func (s *TelegramService) SendSignal(signal *model.Signal) error {
 	}
 
 	log.Printf("📲 Telegram notification sent for %s", signal.Symbol)
+	return nil
+}
+
+// SendMessage sends a generic message to Telegram
+func (s *TelegramService) SendMessage(message string) error {
+	msg := tgbotapi.NewMessage(s.chatID, message)
+	msg.ParseMode = "HTML"
+
+	_, err := s.bot.Send(msg)
+	if err != nil {
+		return fmt.Errorf("failed to send telegram message: %w", err)
+	}
+
 	return nil
 }
 
@@ -348,7 +733,13 @@ func formatSignalMessage(signal *model.Signal) string {
 	return message
 }
 
-// calculatePercentChange calculates percentage change between two prices
 func calculatePercentChange(from, to float64) float64 {
 	return ((to - from) / from) * 100
+}
+
+// parseChatID converts string chat ID to int64
+func parseChatID(chatIDStr string) int64 {
+	var chatID int64
+	fmt.Sscanf(chatIDStr, "%d", &chatID)
+	return chatID
 }

@@ -33,7 +33,7 @@ func NewDatabaseService() (*DatabaseService, error) {
 		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
 	}
 
-	collection := client.Database("trading-signals").Collection("signals")
+	collection := client.Database("mrcrypto").Collection("signals")
 
 	log.Println("✅ MongoDB connected successfully")
 
@@ -93,8 +93,8 @@ func (s *DatabaseService) CheckCooldown(symbol string, duration time.Duration) b
 
 	timeSince := time.Since(lastTime)
 	if timeSince < duration {
-		log.Printf("⏱️  Cooldown active for %s: %.1f minutes remaining", 
-			symbol, (duration-timeSince).Minutes())
+		log.Printf("⏱️  Cooldown active for %s: %.1f minutes remaining",
+			symbol, (duration - timeSince).Minutes())
 		return true
 	}
 

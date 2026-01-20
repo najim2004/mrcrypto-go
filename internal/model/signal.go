@@ -63,6 +63,10 @@ type Signal struct {
 	TechnicalContext TechnicalContext `json:"technical_context" bson:"technical_context"`
 	AIScore          int              `json:"ai_score" bson:"ai_score"`
 	AIReason         string           `json:"ai_reason" bson:"ai_reason"`
+	Status           string           `json:"status" bson:"status"`                       // ACTIVE, CLOSED
+	CloseReason      string           `json:"close_reason,omitempty" bson:"close_reason"` // TP_HIT, SL_HIT, MANUAL, REVERSED
+	ClosedAt         *time.Time       `json:"closed_at,omitempty" bson:"closed_at"`
+	PnL              float64          `json:"pnl,omitempty" bson:"pnl"` // Profit/Loss percentage
 	Timestamp        time.Time        `json:"timestamp" bson:"timestamp"`
 	CreatedAt        time.Time        `json:"created_at" bson:"created_at"`
 }
