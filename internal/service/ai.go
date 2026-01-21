@@ -50,6 +50,7 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 	}
 
 	prompt := fmt.Sprintf(`You are a senior crypto analyst. Analyze this trading signal and provide a score from 0-100 and a brief reason.
+IMPORTANT: The "reason" field MUST be in Bengali (Bangla) language.
 
 Symbol: %s
 Type: %s
@@ -66,7 +67,7 @@ Technical Context:
 - Order Flow Delta: %.2f
 
 Respond ONLY with a JSON object in this exact format:
-{"score": <number>, "reason": "<brief reason>"}`,
+{"score": <number>, "reason": "<brief reason in Bangla>"}`,
 		signal.Symbol,
 		signal.Type,
 		signal.Tier,
@@ -134,7 +135,7 @@ Respond ONLY with a JSON object in this exact format:
 			return 50, responseText, nil
 		}
 
-		log.Printf("✅ %s - AI validated with model: %s", signal.Symbol, modelName)
+		log.Printf("✅ [AI] %s - Validated! Model: %s, Score: %d/100", signal.Symbol, modelName, aiResult.Score)
 		return aiResult.Score, aiResult.Reason, nil
 	}
 
@@ -154,11 +155,12 @@ func (s *AIService) BatchValidateSignals(signals []*model.Signal) ([]AIValidatio
 
 	// Build batch prompt
 	prompt := `You are a senior crypto analyst. Analyze these trading signals and provide a score (0-100) and brief reason for EACH signal.
+IMPORTANT: The "reason" field MUST be in Bengali (Bangla) language.
 
 Respond with a JSON array in this exact format:
 [
-  {"signal": 1, "score": <number>, "reason": "<brief reason>"},
-  {"signal": 2, "score": <number>, "reason": "<brief reason>"},
+  {"signal": 1, "score": <number>, "reason": "<brief reason in Bangla>"},
+  {"signal": 2, "score": <number>, "reason": "<brief reason in Bangla>"},
   ...
 ]
 
@@ -215,10 +217,13 @@ Technical Context:
 		"gemini-2.5-pro",
 	}
 
+	log.Printf("🤖 [AI Batch] Validating %d signals (trying %d models)...", len(signals), len(models))
+
 	var lastError error
 
 	// Try each model until one succeeds
 	for i, modelName := range models {
+		log.Printf("⏳ [AI Batch] Trying model: %s (%d/%d)...", modelName, i+1, len(models))
 		result, err := s.client.Models.GenerateContent(
 			s.ctx,
 			modelName,
@@ -271,7 +276,7 @@ Technical Context:
 			}
 		}
 
-		log.Printf("✅ Batch validated %d signals with model: %s", len(signals), modelName)
+		log.Printf("✅ [AI Batch] Successfully validated %d signals with model: %s", len(signals), modelName)
 		return validationResults, nil
 	}
 

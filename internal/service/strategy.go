@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"my-tool-go/internal/indicator"
@@ -21,22 +22,23 @@ func NewStrategyService(binance *BinanceService) *StrategyService {
 // EvaluateSymbol analyzes a symbol and generates a signal if conditions are met
 func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Fetch klines for multiple timeframes
-	klines4h, err := s.binance.GetKlines(symbol, "4h", 100)
+	log.Printf("🔄 [Strategy] Evaluating %s...", symbol)
+	klines4h, err := s.binance.GetKlines(symbol, "4h", 1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 4h klines: %w", err)
 	}
 
-	klines1h, err := s.binance.GetKlines(symbol, "1h", 100)
+	klines1h, err := s.binance.GetKlines(symbol, "1h", 1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 1h klines: %w", err)
 	}
 
-	klines15m, err := s.binance.GetKlines(symbol, "15m", 100)
+	klines15m, err := s.binance.GetKlines(symbol, "15m", 1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 15m klines: %w", err)
 	}
 
-	klines5m, err := s.binance.GetKlines(symbol, "5m", 100)
+	klines5m, err := s.binance.GetKlines(symbol, "5m", 1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 5m klines: %w", err)
 	}
@@ -60,20 +62,24 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	volumes5m := extractVolumes(klines5m)
 
 	// Calculate indicators
+	log.Printf("⏳ [Strategy] %s - Calculating RSI indicators...", symbol)
 	rsi4h := indicator.GetLastRSI(closes4h, 14)
 	rsi1h := indicator.GetLastRSI(closes1h, 14)
 	rsi15m := indicator.GetLastRSI(closes15m, 14)
 	rsi5m := indicator.GetLastRSI(closes5m, 14)
 
+	log.Printf("⏳ [Strategy] %s - Calculating ADX indicators...", symbol)
 	adx4h := indicator.GetLastADX(highs4h, lows4h, closes4h, 14)
 	adx1h := indicator.GetLastADX(highs1h, lows1h, closes1h, 14)
 	adx15m := indicator.GetLastADX(highs15m, lows15m, closes15m, 14)
 
 	// Validate that we have valid indicator values
 	if rsi4h == 0 || rsi1h == 0 || adx4h == 0 || adx1h == 0 {
+		log.Printf("⚠️  [Strategy] %s - Insufficient data for indicators", symbol)
 		return nil, nil // Insufficient data for indicators
 	}
 
+	log.Printf("⏳ [Strategy] %s - Calculating VWAP and MACD...", symbol)
 	vwap := indicator.GetLastVWAP(highs5m, lows5m, closes5m, volumes5m)
 	macd, macdSignal, histogram := indicator.GetLastMACD(closes5m, 12, 26, 9)
 
@@ -87,7 +93,6 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Get current price and EMA50
 	currentPrice := closes4h[len(closes4h)-1]
 	ema50 := indicator.CalculateEMA(closes4h, 50)
-
 	// Validate EMA50 calculation
 	if len(ema50) == 0 {
 		return nil, nil // Not enough data for EMA50
@@ -97,9 +102,12 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 
 	// Detect market regime
 	regime := detectRegime(adx4h, currentPrice, ema50Value)
+	log.Printf("ℹ️  [Strategy] %s - Regime: %s (ADX: %.2f, Price: %s, EMA50: %s)",
+		symbol, regime, adx4h, FormatPrice(currentPrice), FormatPrice(ema50Value))
 
 	// Filter out choppy markets
 	if regime == model.RegimeChoppy {
+		log.Printf("⏭️  [Strategy] %s - Skipped (choppy market)", symbol)
 		return nil, nil // No signal for choppy markets
 	}
 
@@ -123,17 +131,24 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	}
 
 	// Try PREMIUM tier first
+	log.Printf("🔍 [Strategy] %s - Checking PREMIUM tier conditions...", symbol)
 	tradingSignal := checkPremiumTier(symbol, currentPrice, regime, techContext, currentVol, avgVol, orderFlowDelta)
 	if tradingSignal != nil {
+		log.Printf("✨ [Strategy] %s - PREMIUM signal generated! Type: %s, Entry: %s",
+			symbol, tradingSignal.Type, FormatPrice(tradingSignal.EntryPrice))
 		return tradingSignal, nil
 	}
 
 	// Try STANDARD tier
+	log.Printf("🔍 [Strategy] %s - Checking STANDARD tier conditions...", symbol)
 	tradingSignal = checkStandardTier(symbol, currentPrice, regime, techContext, currentVol, avgVol)
 	if tradingSignal != nil {
+		log.Printf("✨ [Strategy] %s - STANDARD signal generated! Type: %s, Entry: %s",
+			symbol, tradingSignal.Type, FormatPrice(tradingSignal.EntryPrice))
 		return tradingSignal, nil
 	}
 
+	log.Printf("⏭️  [Strategy] %s - No signal conditions met", symbol)
 	return nil, nil // No signal generated
 }
 

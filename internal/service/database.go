@@ -48,6 +48,7 @@ func (s *DatabaseService) SaveSignal(signal *model.Signal) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	log.Printf("💾 [Database] Saving signal for %s...", signal.Symbol)
 	signal.CreatedAt = time.Now()
 
 	_, err := s.collection.InsertOne(ctx, signal)
@@ -81,6 +82,7 @@ func (s *DatabaseService) GetLastSignalTime(symbol string) (time.Time, error) {
 
 // CheckCooldown checks if enough time has passed since the last signal
 func (s *DatabaseService) CheckCooldown(symbol string, duration time.Duration) bool {
+	log.Printf("⏳ [Database] Checking cooldown for %s...", symbol)
 	lastTime, err := s.GetLastSignalTime(symbol)
 	if err != nil {
 		log.Printf("⚠️  Error checking cooldown for %s: %v", symbol, err)

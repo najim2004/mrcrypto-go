@@ -51,7 +51,7 @@ func (sm *SignalMonitor) MonitorActiveSignals() {
 		return // No active signals to monitor
 	}
 
-	log.Printf("👀 Monitoring %d active signals...", len(signals))
+	log.Printf("👀 [Monitor] Monitoring %d active signals...", len(signals))
 
 	// Check each signal
 	for _, signal := range signals {
@@ -61,6 +61,8 @@ func (sm *SignalMonitor) MonitorActiveSignals() {
 
 // checkSignal checks individual signal for TP/SL/Reversal
 func (sm *SignalMonitor) checkSignal(signal *model.Signal) {
+	log.Printf("⏳ [Monitor] Checking %s (Type: %s, Entry: %s)...",
+		signal.Symbol, signal.Type, formatPrice(signal.EntryPrice))
 	// Fetch current price from Binance
 	klines, err := sm.binance.GetKlines(signal.Symbol, "1m", 1)
 	if err != nil {

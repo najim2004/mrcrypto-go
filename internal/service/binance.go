@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -31,6 +32,7 @@ func (s *BinanceService) GetKlines(symbol, interval string, limit int) ([]model.
 	url := fmt.Sprintf("%s/api/v3/klines?symbol=%s&interval=%s&limit=%d",
 		s.baseURL, symbol, interval, limit)
 
+	log.Printf("🌐 [Binance API] Fetching %s klines (%s, limit: %d)...", symbol, interval, limit)
 	resp, err := s.client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch klines: %w", err)
@@ -72,6 +74,7 @@ func (s *BinanceService) GetKlines(symbol, interval string, limit int) ([]model.
 		})
 	}
 
+	log.Printf("✅ [Binance API] Successfully fetched %d %s klines for %s", len(klines), interval, symbol)
 	return klines, nil
 }
 

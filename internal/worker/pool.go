@@ -28,10 +28,12 @@ func NewPool(workers int, strategy *service.StrategyService) *WorkerPool {
 
 // Start launches the worker goroutines
 func (p *WorkerPool) Start() {
+	log.Printf("🔄 [Worker Pool] Starting %d workers...", p.workers)
 	for i := 0; i < p.workers; i++ {
 		p.wg.Add(1)
 		go p.worker(i)
 	}
+	log.Printf("✅ [Worker Pool] All %d workers started", p.workers)
 }
 
 // worker processes jobs from the jobs channel
@@ -39,16 +41,19 @@ func (p *WorkerPool) worker(id int) {
 	defer p.wg.Done()
 
 	for symbol := range p.jobs {
+		log.Printf("⏳ [Worker %d] Processing %s...", id, symbol)
 		signal, err := p.strategy.EvaluateSymbol(symbol)
 		if err != nil {
-			log.Printf("⚠️  Worker %d: Error evaluating %s: %v", id, symbol, err)
+			log.Printf("⚠️  [Worker %d] Error evaluating %s: %v", id, symbol, err)
 			continue
 		}
 
 		if signal != nil {
+			log.Printf("📈 [Worker %d] Signal found for %s!", id, symbol)
 			p.results <- signal
 		}
 	}
+	log.Printf("✅ [Worker %d] Completed all jobs", id)
 }
 
 // AddJob adds a symbol to the job queue
@@ -58,6 +63,7 @@ func (p *WorkerPool) AddJob(symbol string) {
 
 // Wait closes the jobs channel and waits for all workers to finish
 func (p *WorkerPool) Wait() []*model.Signal {
+	log.Printf("⏳ [Worker Pool] Waiting for all workers to complete...")
 	close(p.jobs)
 	p.wg.Wait()
 	close(p.results)
@@ -68,5 +74,6 @@ func (p *WorkerPool) Wait() []*model.Signal {
 		signals = append(signals, signal)
 	}
 
+	log.Printf("✅ [Worker Pool] All workers completed. Collected %d signals", len(signals))
 	return signals
 }

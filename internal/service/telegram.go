@@ -580,6 +580,7 @@ func (s *TelegramService) sendMessage(chatID int64, message string) {
 
 // SendSignal sends a trading signal notification to Telegram
 func (s *TelegramService) SendSignal(signal *model.Signal) error {
+	log.Printf("📤 [Telegram] Sending signal notification for %s...", signal.Symbol)
 	message := formatSignalMessage(signal)
 
 	msg := tgbotapi.NewMessage(s.chatID, message)
@@ -636,9 +637,6 @@ func formatSignalMessage(signal *model.Signal) string {
 	reward := calculatePercentChange(signal.EntryPrice, signal.TakeProfit)
 	rrRatio := reward / (-risk)
 
-	// Position size recommendation (based on 2% risk rule)
-	recommendedPosition := 2.0 / (-risk)
-
 	// Escape AI reason to prevent HTML parsing issues
 	aiReason := escapeHTML(signal.AIReason)
 
@@ -677,33 +675,6 @@ func formatSignalMessage(signal *model.Signal) string {
 <b>🤖 AI স্কোর:</b> %d/100
 <b>💭 AI মতামত:</b> %s
 
-━━━━━━━━━━━━━━━━━━
-<b>💡 ট্রেডিং গাইড</b>
-━━━━━━━━━━━━━━━━━━
-
-<b>১. পজিশন সাইজ:</b>
-   আপনার মোট ক্যাপিটালের %.1f%% ব্যবহার করুন
-   (২%% রিস্ক রুল অনুযায়ী)
-
-<b>২. এন্ট্রি স্ট্র্যাটেজি:</b>
-   • এন্ট্রি প্রাইসের কাছে অপেক্ষা করুন
-   • একবারে সব না কিনে ২-৩ ভাগে কিনুন
-   • ভলিউম বেশি থাকলে এন্ট্রি নিন
-
-<b>৩. এক্সিট স্ট্র্যাটেজি:</b>
-   • টেক প্রফিটে ৫০%% বিক্রি করুন
-   • বাকি ৫০%% trailing stop দিয়ে রাখুন
-   • স্টপ লস অবশ্যই মেনে চলুন
-
-<b>৪. রিস্ক ম্যানেজমেন্ট:</b>
-   • কখনো স্টপ লস মুভ করবেন না
-   • একাধিক ট্রেড একসাথে নেবেন না
-   • প্রতি ট্রেডে সর্বোচ্চ ২-৩%% রিস্ক নিন
-
-━━━━━━━━━━━━━━━━━━
-⚠️ <b>সতর্কতা:</b> ট্রেডিং ঝুঁকিপূর্ণ। 
-শুধুমাত্র সেই টাকা ব্যবহার করুন যা হারাতে পারবেন।
-━━━━━━━━━━━━━━━━━━
 `,
 		emoji,
 		signal.Type,
@@ -727,7 +698,6 @@ func formatSignalMessage(signal *model.Signal) string {
 		signal.TechnicalContext.Histogram,
 		signal.AIScore,
 		aiReason,
-		recommendedPosition,
 	)
 
 	return message

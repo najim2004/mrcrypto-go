@@ -83,10 +83,12 @@ func (l *Loader) poll() {
 	log.Printf("📊 Fetched %d symbols", len(symbols))
 
 	// Create worker pool with 10 workers
+	log.Printf("🔄 [Loader] Creating worker pool with 10 workers...")
 	pool := worker.NewPool(10, l.strategy)
 	pool.Start()
 
 	// Add all symbols as jobs
+	log.Printf("⏳ [Loader] Distributing %d jobs to workers...", len(symbols))
 	for _, symbol := range symbols {
 		pool.AddJob(symbol)
 	}
@@ -104,6 +106,7 @@ func (l *Loader) poll() {
 	}
 
 	// Filter signals by cooldown first
+	log.Printf("⏳ [Loader] Filtering %d signals by cooldown (4h)...", len(signals))
 	var validForAI []*model.Signal
 	for _, signal := range signals {
 		if l.database.CheckCooldown(signal.Symbol, 4*time.Hour) {
@@ -115,10 +118,12 @@ func (l *Loader) poll() {
 
 	if len(validForAI) == 0 {
 		log.Println("===========================================")
-		log.Println("✨ Polling complete - All signals in cooldown")
+		log.Printf("✨ Polling complete - All %d signals in cooldown", len(signals))
 		log.Println("===========================================")
 		return
 	}
+
+	log.Printf("✅ [Loader] %d signals passed cooldown filter", len(validForAI))
 
 	// BATCH AI VALIDATION (Optimized - Single API Call)
 	log.Printf("🤖 Batch validating %d signals with AI...", len(validForAI))
@@ -129,6 +134,7 @@ func (l *Loader) poll() {
 	}
 
 	// Process validated signals
+	log.Printf("⏳ [Loader] Processing %d AI validation results...", len(aiResults))
 	validSignals := 0
 	for idx, signal := range validForAI {
 		if idx >= len(aiResults) {
