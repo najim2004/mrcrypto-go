@@ -1,6 +1,9 @@
 package indicator
 
-import "math"
+import (
+	"math"
+	internalmath "my-tool-go/internal/math"
+)
 
 // CalculateEMA calculates the Exponential Moving Average
 func CalculateEMA(closes []float64, period int) []float64 {
@@ -26,24 +29,8 @@ func CalculateEMA(closes []float64, period int) []float64 {
 	return ema
 }
 
-// CalculateTrueRange calculates the True Range
 func CalculateTrueRange(high, low, close []float64) []float64 {
-	if len(high) != len(low) || len(low) != len(close) {
-		return []float64{}
-	}
-
-	tr := make([]float64, len(high))
-	tr[0] = high[0] - low[0]
-
-	for i := 1; i < len(high); i++ {
-		hl := high[i] - low[i]
-		hc := math.Abs(high[i] - close[i-1])
-		lc := math.Abs(low[i] - close[i-1])
-
-		tr[i] = math.Max(hl, math.Max(hc, lc))
-	}
-
-	return tr
+	return internalmath.CalculateTrueRange(high, low, close)
 }
 
 // CalculateADX calculates the Average Directional Index

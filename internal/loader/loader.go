@@ -101,7 +101,7 @@ func (l *Loader) poll() {
 	if len(signals) == 0 {
 		log.Println("===========================================")
 		log.Println("✨ Polling complete - 0 signals generated")
-		log.Println("===========================================\n")
+		log.Println("===========================================")
 		return
 	}
 

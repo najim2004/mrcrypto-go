@@ -3,9 +3,11 @@ package service
 import (
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"my-tool-go/internal/indicator"
+	internalmath "my-tool-go/internal/math"
 	"my-tool-go/internal/model"
 )
 
@@ -19,26 +21,45 @@ func NewStrategyService(binance *BinanceService) *StrategyService {
 	}
 }
 
-// EvaluateSymbol analyzes a symbol and generates a signal if conditions are met
+// ========================================
+// PROFESSIONAL STRATEGY v2.0
+// Proper Order: Context → Key Levels → Regime → Confluence → Entry → Risk
+// ========================================
+
+// EvaluateSymbol analyzes a symbol using professional multi-factor confluence approach
 func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
-	// Fetch klines for multiple timeframes
 	log.Printf("🔄 [Strategy] Evaluating %s...", symbol)
-	klines4h, err := s.binance.GetKlines(symbol, "4h", 1000)
+
+	// ========================================
+	// STEP 1: DATA COLLECTION (Higher TF First)
+	// ========================================
+
+	// Daily for pivot points
+	klines1d, err := s.binance.GetKlines(symbol, "1d", 10)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch 1d klines: %w", err)
+	}
+
+	// 4H for trend direction and key levels
+	klines4h, err := s.binance.GetKlines(symbol, "4h", 200)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 4h klines: %w", err)
 	}
 
-	klines1h, err := s.binance.GetKlines(symbol, "1h", 1000)
+	// 1H for confirmation
+	klines1h, err := s.binance.GetKlines(symbol, "1h", 200)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 1h klines: %w", err)
 	}
 
-	klines15m, err := s.binance.GetKlines(symbol, "15m", 1000)
+	// 15m for alignment
+	klines15m, err := s.binance.GetKlines(symbol, "15m", 200)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 15m klines: %w", err)
 	}
 
-	klines5m, err := s.binance.GetKlines(symbol, "5m", 1000)
+	// 5m for entry timing
+	klines5m, err := s.binance.GetKlines(symbol, "5m", 200)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch 5m klines: %w", err)
 	}
@@ -61,57 +82,179 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	lows5m := extractLows(klines5m)
 	volumes5m := extractVolumes(klines5m)
 
-	// Calculate indicators
-	log.Printf("⏳ [Strategy] %s - Calculating RSI indicators...", symbol)
+	currentPrice := closes5m[len(closes5m)-1]
+
+	// ========================================
+	// STEP 2: KEY LEVELS (Before anything else)
+	// ========================================
+	log.Printf("⏳ [Strategy] %s - Calculating key levels...", symbol)
+
+	// Daily Pivot Points
+	var pivotPoints internalmath.PivotPoints
+	if len(klines1d) >= 2 {
+		prevDay := klines1d[len(klines1d)-2]
+		pivotPoints = internalmath.CalculateStandardPivots(prevDay.High, prevDay.Low, prevDay.Close)
+	}
+	nearestPivotPrice, nearestPivotName := internalmath.FindNearestPivotLevel(currentPrice, pivotPoints)
+
+	// 4H Swing High/Low for Fibonacci
+	high4h, low4h := findSwingHighLow(highs4h, lows4h, 50)
+
+	// Determine trend for Fib calculation
+	ema50_4h := indicator.CalculateEMA(closes4h, 50)
+	if len(ema50_4h) == 0 {
+		return nil, nil
+	}
+	ema50Value := ema50_4h[len(ema50_4h)-1]
+
+	fibTrend := "UP"
+	if currentPrice < ema50Value {
+		fibTrend = "DOWN"
+	}
+	fibLevels := internalmath.CalculateRetracements(high4h, low4h, fibTrend)
+	nearestFibPrice, nearestFibName := internalmath.FindNearestFibLevel(currentPrice, fibLevels)
+
+	// ATR for volatility-based stops
+	atr1h := internalmath.CalculateATR(highs1h, lows1h, closes1h, 14)
+
+	// ========================================
+	// STEP 3: INDICATOR CALCULATION
+	// ========================================
+	log.Printf("⏳ [Strategy] %s - Calculating indicators...", symbol)
+
+	// RSI - Multi-timeframe
 	rsi4h := indicator.GetLastRSI(closes4h, 14)
 	rsi1h := indicator.GetLastRSI(closes1h, 14)
 	rsi15m := indicator.GetLastRSI(closes15m, 14)
 	rsi5m := indicator.GetLastRSI(closes5m, 14)
 
-	log.Printf("⏳ [Strategy] %s - Calculating ADX indicators...", symbol)
+	// ADX - Trend strength
 	adx4h := indicator.GetLastADX(highs4h, lows4h, closes4h, 14)
 	adx1h := indicator.GetLastADX(highs1h, lows1h, closes1h, 14)
 	adx15m := indicator.GetLastADX(highs15m, lows15m, closes15m, 14)
 
-	// Validate that we have valid indicator values
-	if rsi4h == 0 || rsi1h == 0 || adx4h == 0 || adx1h == 0 {
-		log.Printf("⚠️  [Strategy] %s - Insufficient data for indicators", symbol)
-		return nil, nil // Insufficient data for indicators
+	// Validate data
+	if rsi4h == 0 || rsi1h == 0 || adx4h == 0 {
+		log.Printf("⚠️  [Strategy] %s - Insufficient data", symbol)
+		return nil, nil
 	}
 
-	log.Printf("⏳ [Strategy] %s - Calculating VWAP and MACD...", symbol)
+	// VWAP & MACD
 	vwap := indicator.GetLastVWAP(highs5m, lows5m, closes5m, volumes5m)
 	macd, macdSignal, histogram := indicator.GetLastMACD(closes5m, 12, 26, 9)
 
-	// Calculate volume metrics
+	// Volume
 	avgVol := calculateAverage(volumes5m)
 	currentVol := volumes5m[len(volumes5m)-1]
+	volRatio := currentVol / avgVol
 
-	// Calculate order flow delta (simplified)
+	// Order Flow
 	orderFlowDelta := calculateOrderFlowDelta(klines5m)
 
-	// Get current price and EMA50
-	currentPrice := closes4h[len(closes4h)-1]
-	ema50 := indicator.CalculateEMA(closes4h, 50)
-	// Validate EMA50 calculation
-	if len(ema50) == 0 {
-		return nil, nil // Not enough data for EMA50
-	}
+	// ========================================
+	// STEP 4: REGIME DETECTION
+	// ========================================
+	regime := detectRegimePro(adx4h, adx1h, currentPrice, ema50Value)
 
-	ema50Value := ema50[len(ema50)-1]
+	log.Printf("ℹ️  [Strategy] %s - Regime: %s (ADX4h: %.1f, ADX1h: %.1f)",
+		symbol, regime, adx4h, adx1h)
 
-	// Detect market regime
-	regime := detectRegime(adx4h, currentPrice, ema50Value)
-	log.Printf("ℹ️  [Strategy] %s - Regime: %s (ADX: %.2f, Price: %s, EMA50: %s)",
-		symbol, regime, adx4h, FormatPrice(currentPrice), FormatPrice(ema50Value))
-
-	// Filter out choppy markets
+	// Skip choppy markets early
 	if regime == model.RegimeChoppy {
-		log.Printf("⏭️  [Strategy] %s - Skipped (choppy market)", symbol)
-		return nil, nil // No signal for choppy markets
+		log.Printf("⏭️  [Strategy] %s - Skipped (choppy ADX < 15)", symbol)
+		return nil, nil
 	}
 
-	// Technical context
+	// ========================================
+	// STEP 5: CONFLUENCE SCORING (0-100)
+	// ========================================
+	signalDir := determineSignalDirection(regime, currentPrice, ema50Value, rsi4h)
+	if signalDir == "" {
+		log.Printf("⏭️  [Strategy] %s - No clear direction", symbol)
+		return nil, nil
+	}
+
+	score := calculateConfluenceScore(
+		signalDir, regime,
+		rsi4h, rsi1h, rsi15m, rsi5m,
+		adx4h, adx1h, adx15m,
+		histogram, volRatio, orderFlowDelta,
+		currentPrice, pivotPoints, fibLevels,
+	)
+
+	log.Printf("📊 [Strategy] %s - Confluence Score: %d/100 (Dir: %s)", symbol, score, signalDir)
+
+	// Minimum score threshold
+	if score < 60 {
+		log.Printf("⏭️  [Strategy] %s - Score too low (%d < 60)", symbol, score)
+		return nil, nil
+	}
+
+	// ========================================
+	// STEP 6: KEY LEVEL PROXIMITY CHECK
+	// ========================================
+	pivotProximity := math.Abs(currentPrice-nearestPivotPrice) / currentPrice * 100
+	fibProximity := math.Abs(currentPrice-nearestFibPrice) / currentPrice * 100
+
+	// Must be within 2% of a key level for entry
+	nearKeyLevel := pivotProximity <= 2.0 || fibProximity <= 2.0
+	if !nearKeyLevel && score < 80 {
+		log.Printf("⏭️  [Strategy] %s - Not near key level (Pivot: %.2f%%, Fib: %.2f%%)",
+			symbol, pivotProximity, fibProximity)
+		return nil, nil
+	}
+
+	// ========================================
+	// STEP 7: DETERMINE TIER
+	// ========================================
+	tier := model.TierStandard
+	if score >= 80 && adx4h >= 30 && volRatio >= 2.0 {
+		tier = model.TierPremium
+	}
+
+	// ========================================
+	// STEP 8: CALCULATE ATR-BASED SL/TP
+	// ========================================
+	var stopLoss, takeProfit float64
+	atrMultiplierSL := 1.5
+	atrMultiplierTP := 3.0 // 2:1 R:R minimum
+
+	if signalDir == "LONG" {
+		stopLoss = currentPrice - (atr1h * atrMultiplierSL)
+		// TP at next resistance or ATR target
+		tpATR := currentPrice + (atr1h * atrMultiplierTP)
+		tpPivot := getNextResistance(currentPrice, pivotPoints)
+		takeProfit = math.Max(tpATR, tpPivot)
+	} else {
+		stopLoss = currentPrice + (atr1h * atrMultiplierSL)
+		// TP at next support or ATR target
+		tpATR := currentPrice - (atr1h * atrMultiplierTP)
+		tpPivot := getNextSupport(currentPrice, pivotPoints)
+		takeProfit = math.Min(tpATR, tpPivot)
+	}
+
+	// ========================================
+	// STEP 9: RISK MANAGEMENT
+	// ========================================
+	rrResult := internalmath.CalculateRiskReward(currentPrice, stopLoss, takeProfit)
+
+	// Minimum 2:1 R:R required
+	if rrResult.Ratio < 2.0 {
+		log.Printf("⏭️  [Strategy] %s - R:R too low (%.2f < 2.0)", symbol, rrResult.Ratio)
+		return nil, nil
+	}
+
+	// Position sizing with Kelly Criterion
+	recommendedSize := internalmath.CalculateKellyCriterion(0.55, rrResult.Ratio, 1.0)
+
+	// ========================================
+	// STEP 10: BUILD SIGNAL
+	// ========================================
+	signalType := model.SignalTypeLong
+	if signalDir == "SHORT" {
+		signalType = model.SignalTypeShort
+	}
+
 	techContext := model.TechnicalContext{
 		RSI4h:          rsi4h,
 		RSI1h:          rsi1h,
@@ -128,148 +271,239 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		Histogram:      histogram,
 		OrderFlowDelta: orderFlowDelta,
 		Regime:         string(regime),
+		PivotPoint:     pivotPoints.Pivot,
+		PivotR1:        pivotPoints.R1,
+		PivotR2:        pivotPoints.R2,
+		PivotR3:        pivotPoints.R3,
+		PivotS1:        pivotPoints.S1,
+		PivotS2:        pivotPoints.S2,
+		PivotS3:        pivotPoints.S3,
+		NearestPivot:   nearestPivotName,
+		Fib236:         fibLevels.Level236,
+		Fib382:         fibLevels.Level382,
+		Fib500:         fibLevels.Level500,
+		Fib618:         fibLevels.Level618,
+		Fib786:         fibLevels.Level786,
+		NearestFib:     nearestFibName,
 	}
 
-	// Try PREMIUM tier first
-	log.Printf("🔍 [Strategy] %s - Checking PREMIUM tier conditions...", symbol)
-	tradingSignal := checkPremiumTier(symbol, currentPrice, regime, techContext, currentVol, avgVol, orderFlowDelta)
-	if tradingSignal != nil {
-		log.Printf("✨ [Strategy] %s - PREMIUM signal generated! Type: %s, Entry: %s",
-			symbol, tradingSignal.Type, FormatPrice(tradingSignal.EntryPrice))
-		return tradingSignal, nil
-	}
-
-	// Try STANDARD tier
-	log.Printf("🔍 [Strategy] %s - Checking STANDARD tier conditions...", symbol)
-	tradingSignal = checkStandardTier(symbol, currentPrice, regime, techContext, currentVol, avgVol)
-	if tradingSignal != nil {
-		log.Printf("✨ [Strategy] %s - STANDARD signal generated! Type: %s, Entry: %s",
-			symbol, tradingSignal.Type, FormatPrice(tradingSignal.EntryPrice))
-		return tradingSignal, nil
-	}
-
-	log.Printf("⏭️  [Strategy] %s - No signal conditions met", symbol)
-	return nil, nil // No signal generated
-}
-
-// detectRegime determines market regime based on ADX and price vs EMA
-func detectRegime(adx, price, ema50 float64) model.MarketRegime {
-	if adx < 20 {
-		return model.RegimeChoppy
-	}
-
-	if price > ema50 {
-		return model.RegimeTrendingUp
-	} else if price < ema50 {
-		return model.RegimeTrendingDown
-	}
-
-	return model.RegimeRanging
-}
-
-// checkPremiumTier checks if conditions meet PREMIUM tier criteria
-func checkPremiumTier(symbol string, currentPrice float64, regime model.MarketRegime,
-	techContext model.TechnicalContext, currentVol, avgVol, orderFlowDelta float64) *model.Signal {
-
-	// PREMIUM requirements: ADX > 25, stricter RSI, 2x volume, positive order flow
-	if techContext.ADX1h < 25 {
-		return nil
-	}
-
-	if currentVol < avgVol*2.0 {
-		return nil
-	}
-
-	// Check for LONG signal
-	if regime == model.RegimeTrendingUp &&
-		techContext.RSI1h > 50 && techContext.RSI1h < 65 &&
-		techContext.RSI5m > 40 && techContext.RSI5m < 70 &&
-		orderFlowDelta > 0 &&
-		techContext.Histogram > 0 {
-
-		return createSignal(symbol, model.SignalTypeLong, model.TierPremium,
-			currentPrice, regime, techContext)
-	}
-
-	// Check for SHORT signal
-	if regime == model.RegimeTrendingDown &&
-		techContext.RSI1h > 35 && techContext.RSI1h < 50 &&
-		techContext.RSI5m > 30 && techContext.RSI5m < 60 &&
-		orderFlowDelta < 0 &&
-		techContext.Histogram < 0 {
-
-		return createSignal(symbol, model.SignalTypeShort, model.TierPremium,
-			currentPrice, regime, techContext)
-	}
-
-	return nil
-}
-
-// checkStandardTier checks if conditions meet STANDARD tier criteria
-func checkStandardTier(symbol string, currentPrice float64, regime model.MarketRegime,
-	techContext model.TechnicalContext, currentVol, avgVol float64) *model.Signal {
-
-	// STANDARD requirements: ADX > 20, wider RSI, 1x volume
-	if techContext.ADX1h < 20 {
-		return nil
-	}
-
-	if currentVol < avgVol {
-		return nil
-	}
-
-	// Check for LONG signal
-	if regime == model.RegimeTrendingUp &&
-		techContext.RSI1h > 40 && techContext.RSI1h < 70 &&
-		techContext.RSI5m > 35 && techContext.RSI5m < 75 &&
-		techContext.Histogram > 0 {
-
-		return createSignal(symbol, model.SignalTypeLong, model.TierStandard,
-			currentPrice, regime, techContext)
-	}
-
-	// Check for SHORT signal
-	if regime == model.RegimeTrendingDown &&
-		techContext.RSI1h > 30 && techContext.RSI1h < 60 &&
-		techContext.RSI5m > 25 && techContext.RSI5m < 65 &&
-		techContext.Histogram < 0 {
-
-		return createSignal(symbol, model.SignalTypeShort, model.TierStandard,
-			currentPrice, regime, techContext)
-	}
-
-	return nil
-}
-
-// createSignal creates a signal with calculated stop loss and take profit
-func createSignal(symbol string, signalType model.SignalType, tier model.SignalTier,
-	entryPrice float64, regime model.MarketRegime, techContext model.TechnicalContext) *model.Signal {
-
-	var stopLoss, takeProfit float64
-
-	if signalType == model.SignalTypeLong {
-		stopLoss = entryPrice * 0.98   // 2% stop loss
-		takeProfit = entryPrice * 1.06 // 6% take profit (3:1 R/R)
-	} else {
-		stopLoss = entryPrice * 1.02   // 2% stop loss
-		takeProfit = entryPrice * 0.94 // 6% take profit (3:1 R/R)
-	}
-
-	return &model.Signal{
+	signal := &model.Signal{
 		Symbol:           symbol,
 		Type:             signalType,
 		Tier:             tier,
-		EntryPrice:       entryPrice,
+		EntryPrice:       currentPrice,
 		StopLoss:         stopLoss,
 		TakeProfit:       takeProfit,
+		RiskRewardRatio:  rrResult.Ratio,
+		RecommendedSize:  recommendedSize,
 		Regime:           string(regime),
 		TechnicalContext: techContext,
 		Status:           "ACTIVE",
 		Timestamp:        time.Now(),
 	}
+
+	log.Printf("✨ [Strategy] %s - %s signal! Score: %d, Tier: %s, R:R: %.2f, Entry: %s, SL: %s, TP: %s",
+		symbol, signalDir, score, tier, rrResult.Ratio,
+		FormatPrice(currentPrice), FormatPrice(stopLoss), FormatPrice(takeProfit))
+
+	return signal, nil
 }
 
-// Helper functions to extract data from klines
+// ========================================
+// PROFESSIONAL HELPER FUNCTIONS
+// ========================================
+
+// detectRegimePro uses multi-timeframe ADX for better regime detection
+func detectRegimePro(adx4h, adx1h, price, ema50 float64) model.MarketRegime {
+	avgADX := (adx4h + adx1h) / 2
+
+	if avgADX < 15 {
+		return model.RegimeChoppy
+	}
+
+	if avgADX < 20 {
+		return model.RegimeRanging
+	}
+
+	// Strong trend
+	if price > ema50 {
+		return model.RegimeTrendingUp
+	}
+	return model.RegimeTrendingDown
+}
+
+// determineSignalDirection determines if we should look for LONG or SHORT
+func determineSignalDirection(regime model.MarketRegime, price, ema50, rsi4h float64) string {
+	if regime == model.RegimeTrendingUp && price > ema50 && rsi4h < 70 {
+		return "LONG"
+	}
+	if regime == model.RegimeTrendingDown && price < ema50 && rsi4h > 30 {
+		return "SHORT"
+	}
+	return ""
+}
+
+// calculateConfluenceScore calculates weighted confluence score (0-100)
+func calculateConfluenceScore(
+	direction string, regime model.MarketRegime,
+	rsi4h, rsi1h, rsi15m, rsi5m float64,
+	adx4h, adx1h, adx15m float64,
+	histogram, volRatio, orderFlow float64,
+	price float64, pivots internalmath.PivotPoints, fibs internalmath.FibonacciLevels,
+) int {
+	score := 0
+
+	// 1. Trend Alignment (4H + 1H same direction) - 25 points
+	if regime == model.RegimeTrendingUp || regime == model.RegimeTrendingDown {
+		if adx4h > 20 && adx1h > 20 {
+			score += 25
+		} else if adx4h > 20 || adx1h > 20 {
+			score += 15
+		}
+	}
+
+	// 2. RSI Momentum (not overbought/oversold) - 20 points
+	if direction == "LONG" {
+		if rsi4h > 40 && rsi4h < 65 && rsi1h > 45 && rsi1h < 70 {
+			score += 20
+		} else if rsi4h > 35 && rsi4h < 70 {
+			score += 10
+		}
+	} else {
+		if rsi4h > 35 && rsi4h < 60 && rsi1h > 30 && rsi1h < 55 {
+			score += 20
+		} else if rsi4h > 30 && rsi4h < 65 {
+			score += 10
+		}
+	}
+
+	// 3. Key Level Proximity - 20 points
+	pivotDist := getPivotDistance(price, pivots)
+	fibDist := getFibDistance(price, fibs)
+
+	if pivotDist <= 1.0 || fibDist <= 1.0 {
+		score += 20
+	} else if pivotDist <= 2.0 || fibDist <= 2.0 {
+		score += 12
+	} else if pivotDist <= 3.0 || fibDist <= 3.0 {
+		score += 5
+	}
+
+	// 4. Volume Confirmation - 15 points
+	if volRatio >= 2.0 {
+		score += 15
+	} else if volRatio >= 1.5 {
+		score += 10
+	} else if volRatio >= 1.2 {
+		score += 5
+	}
+
+	// 5. MACD Alignment - 10 points
+	if direction == "LONG" && histogram > 0 {
+		score += 10
+	} else if direction == "SHORT" && histogram < 0 {
+		score += 10
+	}
+
+	// 6. Order Flow - 10 points
+	if direction == "LONG" && orderFlow > 0 {
+		score += 10
+	} else if direction == "SHORT" && orderFlow < 0 {
+		score += 10
+	}
+
+	return score
+}
+
+// findSwingHighLow finds swing high and low from recent candles
+func findSwingHighLow(highs, lows []float64, lookback int) (float64, float64) {
+	if len(highs) < lookback {
+		lookback = len(highs)
+	}
+
+	high := highs[len(highs)-lookback]
+	low := lows[len(lows)-lookback]
+
+	for i := len(highs) - lookback; i < len(highs); i++ {
+		if highs[i] > high {
+			high = highs[i]
+		}
+		if lows[i] < low {
+			low = lows[i]
+		}
+	}
+
+	return high, low
+}
+
+// getPivotDistance returns minimum % distance to any pivot level
+func getPivotDistance(price float64, pivots internalmath.PivotPoints) float64 {
+	levels := []float64{pivots.Pivot, pivots.R1, pivots.R2, pivots.R3, pivots.S1, pivots.S2, pivots.S3}
+	minDist := 100.0
+
+	for _, level := range levels {
+		if level == 0 {
+			continue
+		}
+		dist := math.Abs(price-level) / price * 100
+		if dist < minDist {
+			minDist = dist
+		}
+	}
+
+	return minDist
+}
+
+// getFibDistance returns minimum % distance to any fib level
+func getFibDistance(price float64, fibs internalmath.FibonacciLevels) float64 {
+	levels := []float64{fibs.Level236, fibs.Level382, fibs.Level500, fibs.Level618, fibs.Level786}
+	minDist := 100.0
+
+	for _, level := range levels {
+		if level == 0 {
+			continue
+		}
+		dist := math.Abs(price-level) / price * 100
+		if dist < minDist {
+			minDist = dist
+		}
+	}
+
+	return minDist
+}
+
+// getNextResistance finds next resistance level above price
+func getNextResistance(price float64, pivots internalmath.PivotPoints) float64 {
+	levels := []float64{pivots.Pivot, pivots.R1, pivots.R2, pivots.R3}
+	nextRes := price * 1.10 // Default 10% above
+
+	for _, level := range levels {
+		if level > price && level < nextRes {
+			nextRes = level
+		}
+	}
+
+	return nextRes
+}
+
+// getNextSupport finds next support level below price
+func getNextSupport(price float64, pivots internalmath.PivotPoints) float64 {
+	levels := []float64{pivots.Pivot, pivots.S1, pivots.S2, pivots.S3}
+	nextSup := price * 0.90 // Default 10% below
+
+	for _, level := range levels {
+		if level < price && level > nextSup {
+			nextSup = level
+		}
+	}
+
+	return nextSup
+}
+
+// ========================================
+// UTILITY FUNCTIONS
+// ========================================
+
 func extractCloses(klines []model.Kline) []float64 {
 	closes := make([]float64, len(klines))
 	for i, k := range klines {
@@ -314,12 +548,13 @@ func calculateAverage(values []float64) float64 {
 }
 
 func calculateOrderFlowDelta(klines []model.Kline) float64 {
-	// Simplified order flow: assume buying pressure when close > open
 	delta := 0.0
-	for i := len(klines) - 10; i < len(klines); i++ {
-		if i < 0 {
-			continue
-		}
+	start := len(klines) - 20
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i < len(klines); i++ {
 		k := klines[i]
 		if k.Close > k.Open {
 			delta += k.Volume
@@ -330,7 +565,6 @@ func calculateOrderFlowDelta(klines []model.Kline) float64 {
 	return delta
 }
 
-// CalculateDynamicDecimals returns appropriate decimal places based on price
 func CalculateDynamicDecimals(price float64) int {
 	if price < 0.00001 {
 		return 8
@@ -350,7 +584,6 @@ func CalculateDynamicDecimals(price float64) int {
 	return 2
 }
 
-// FormatPrice formats price with dynamic decimals
 func FormatPrice(price float64) string {
 	decimals := CalculateDynamicDecimals(price)
 	format := fmt.Sprintf("%%.%df", decimals)

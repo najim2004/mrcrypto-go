@@ -33,7 +33,7 @@ func main() {
 	}
 	defer databaseService.Close()
 
-	log.Println("✅ All services initialized successfully\n")
+	log.Println("✅ All services initialized successfully")
 
 	// Create and start loader
 	loaderService := loader.NewLoader(

@@ -3,28 +3,50 @@ package math
 import "math"
 
 // CalculateATR calculates Average True Range
+// CalculateATR calculates Average True Range
 func CalculateATR(high, low, close []float64, period int) float64 {
 	if len(high) < period+1 {
 		return 0
 	}
 
-	trueRanges := make([]float64, len(high)-1)
+	trueRanges := CalculateTrueRange(high, low, close)
+
+	// Calculate average of last 'period' true ranges
+	// Note: CalculateTrueRange returns array of same length as input, 
+	// so we take the last 'period' values
+	sum := 0.0
+	count := 0
+	for i := len(trueRanges) - period; i < len(trueRanges); i++ {
+		sum += trueRanges[i]
+		count++
+	}
+
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
+}
+
+// CalculateTrueRange calculates the True Range for a series of prices
+func CalculateTrueRange(high, low, close []float64) []float64 {
+	if len(high) != len(low) || len(low) != len(close) || len(high) == 0 {
+		return []float64{}
+	}
+
+	tr := make([]float64, len(high))
+	
+	// First TR is simply High - Low
+	tr[0] = high[0] - low[0]
 
 	for i := 1; i < len(high); i++ {
 		hl := high[i] - low[i]
 		hc := math.Abs(high[i] - close[i-1])
 		lc := math.Abs(low[i] - close[i-1])
 
-		trueRanges[i-1] = math.Max(hl, math.Max(hc, lc))
+		tr[i] = math.Max(hl, math.Max(hc, lc))
 	}
 
-	// Calculate average of last 'period' true ranges
-	sum := 0.0
-	for i := len(trueRanges) - period; i < len(trueRanges); i++ {
-		sum += trueRanges[i]
-	}
-
-	return sum / float64(period)
+	return tr
 }
 
 // CalculateVolatility calculates volatility percentage
