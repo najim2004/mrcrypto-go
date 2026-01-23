@@ -234,7 +234,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	}
 
 	// ========================================
-	// STEP 9: RISK MANAGEMENT
+	// STEP 9: RISK MANAGEMENT & PROBABILITY
 	// ========================================
 	rrResult := internalmath.CalculateRiskReward(currentPrice, stopLoss, takeProfit)
 
@@ -244,11 +244,22 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		return nil, nil
 	}
 
-	// Position sizing with Kelly Criterion
-	recommendedSize := internalmath.CalculateKellyCriterion(0.55, rrResult.Ratio, 1.0)
+	// Calculate probability metrics
+	signalProbability := internalmath.CalculateSignalProbability(score)
+	breakEvenWinRate := internalmath.CalculateBreakEvenWinRate(rrResult.Ratio)
+
+	// Calculate risk and reward percentages
+	riskPercent := math.Abs(currentPrice-stopLoss) / currentPrice * 100
+	rewardPercent := math.Abs(takeProfit-currentPrice) / currentPrice * 100
+
+	// Calculate nearest level distance
+	nearestLevelDist := math.Min(pivotProximity, fibProximity)
+
+	// Dynamic Kelly position sizing using signal probability
+	recommendedSize := internalmath.CalculateKellyCriterion(signalProbability, rrResult.Ratio, 1.0)
 
 	// ========================================
-	// STEP 10: BUILD SIGNAL
+	// STEP 10: BUILD SIGNAL WITH PROBABILITY DATA
 	// ========================================
 	signalType := model.SignalTypeLong
 	if signalDir == "SHORT" {
@@ -298,13 +309,21 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		RecommendedSize:  recommendedSize,
 		Regime:           string(regime),
 		TechnicalContext: techContext,
-		Status:           "ACTIVE",
-		Timestamp:        time.Now(),
+		// Probability Fields
+		ConfidenceScore:  signalProbability,
+		ConfluenceScore:  score,
+		BreakEvenWinRate: breakEvenWinRate,
+		RiskPercent:      riskPercent,
+		RewardPercent:    rewardPercent,
+		NearestLevelDist: nearestLevelDist,
+		// Status
+		Status:    "ACTIVE",
+		Timestamp: time.Now(),
 	}
 
-	log.Printf("✨ [Strategy] %s - %s signal! Score: %d, Tier: %s, R:R: %.2f, Entry: %s, SL: %s, TP: %s",
-		symbol, signalDir, score, tier, rrResult.Ratio,
-		FormatPrice(currentPrice), FormatPrice(stopLoss), FormatPrice(takeProfit))
+	log.Printf("✨ [Strategy] %s - %s signal! Score: %d (%.0f%% prob), Tier: %s, R:R: %.2f, Entry: %s, SL: %s (%.2f%%), TP: %s (%.2f%%)",
+		symbol, signalDir, score, signalProbability*100, tier, rrResult.Ratio,
+		FormatPrice(currentPrice), FormatPrice(stopLoss), riskPercent, FormatPrice(takeProfit), rewardPercent)
 
 	return signal, nil
 }

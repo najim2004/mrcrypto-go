@@ -49,30 +49,81 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 		return 0, "", fmt.Errorf("gemini client not initialized")
 	}
 
-	prompt := fmt.Sprintf(`You are a senior crypto analyst. Analyze this trading signal and provide a score from 0-100 and a brief reason.
-IMPORTANT: The "reason" field MUST be in Bengali (Bangla) language.
+	// Calculate volume ratio safely
+	volRatio := 0.0
+	if signal.TechnicalContext.AvgVol > 0 {
+		volRatio = signal.TechnicalContext.CurrentVol / signal.TechnicalContext.AvgVol
+	}
 
+	prompt := fmt.Sprintf(`You are a professional crypto trading analyst. Analyze this trading signal using ALL the provided data to make an accurate decision.
+
+CRITICAL EVALUATION CRITERIA:
+1. Confluence Score >= 60 is acceptable, >= 80 is excellent
+2. Risk/Reward >= 2.0 is required
+3. Entry should be near a key level (pivot or fibonacci)
+4. Volume should confirm the move (>= 1.5x average)
+5. Signal confidence shows calculated probability of success
+
+🔔 SIGNAL OVERVIEW:
 Symbol: %s
-Type: %s
-Tier: %s
-Entry Price: %s
-Regime: %s
+Direction: %s (%s Tier)
+Market Regime: %s
 
-Technical Context:
-- RSI (4h/1h/15m/5m): %.2f / %.2f / %.2f / %.2f
-- ADX (4h/1h/15m): %.2f / %.2f / %.2f
-- VWAP: %.6f
-- MACD: %.6f, Signal: %.6f, Histogram: %.6f
-- Volume: Current=%.2f, Avg=%.2f (%.2fx)
+📈 ENTRY & RISK MANAGEMENT:
+- Entry Price: %s
+- Stop Loss: %s (Risk: %.2f%%)
+- Take Profit: %s (Reward: %.2f%%)
+- Risk/Reward Ratio: %.2f
+- Break-even Win Rate Required: %.2f%%
+- Recommended Position Size: %.2f%% of account
+
+📊 TECHNICAL INDICATORS:
+- RSI (4H/1H/15M/5M): %.1f / %.1f / %.1f / %.1f
+- ADX (4H/1H/15M): %.1f / %.1f / %.1f
+- MACD Histogram: %.6f
+- Volume Ratio: %.2fx average
 - Order Flow Delta: %.2f
+- VWAP: %s
 
-Respond ONLY with a JSON object in this exact format:
-{"score": <number>, "reason": "<brief reason in Bangla>"}`,
+🎯 KEY LEVELS:
+- Pivot Point: %s
+- Support: S1=%s, S2=%s, S3=%s
+- Resistance: R1=%s, R2=%s, R3=%s
+- Nearest Pivot: %s
+- Fibonacci 38.2%%: %s
+- Fibonacci 50.0%%: %s
+- Fibonacci 61.8%%: %s
+- Nearest Fib: %s
+- Distance to Nearest Level: %.2f%%
+
+📐 PROBABILITY METRICS:
+- Confluence Score: %d/100
+- Signal Confidence: %.1f%%
+
+ANALYSIS INSTRUCTIONS:
+1. Check if RSI values indicate overbought (>70) or oversold (<30) conditions
+2. Verify ADX > 20 for trend strength confirmation
+3. Confirm entry is near a support (for LONG) or resistance (for SHORT)
+4. Evaluate if R:R ratio justifies the trade
+5. Consider confluence score and confidence probability
+6. Volume should confirm the direction
+
+IMPORTANT: Provide reason in Bengali (Bangla) language.
+
+Respond ONLY with JSON:
+{"score": <0-100>, "reason": "<detailed analysis in Bangla>"}`,
 		signal.Symbol,
 		signal.Type,
 		signal.Tier,
-		FormatPrice(signal.EntryPrice),
 		signal.Regime,
+		FormatPrice(signal.EntryPrice),
+		FormatPrice(signal.StopLoss),
+		signal.RiskPercent,
+		FormatPrice(signal.TakeProfit),
+		signal.RewardPercent,
+		signal.RiskRewardRatio,
+		signal.BreakEvenWinRate,
+		signal.RecommendedSize,
 		signal.TechnicalContext.RSI4h,
 		signal.TechnicalContext.RSI1h,
 		signal.TechnicalContext.RSI15m,
@@ -80,14 +131,25 @@ Respond ONLY with a JSON object in this exact format:
 		signal.TechnicalContext.ADX4h,
 		signal.TechnicalContext.ADX1h,
 		signal.TechnicalContext.ADX15m,
-		signal.TechnicalContext.VWAP,
-		signal.TechnicalContext.MACD,
-		signal.TechnicalContext.Signal,
 		signal.TechnicalContext.Histogram,
-		signal.TechnicalContext.CurrentVol,
-		signal.TechnicalContext.AvgVol,
-		signal.TechnicalContext.CurrentVol/signal.TechnicalContext.AvgVol,
+		volRatio,
 		signal.TechnicalContext.OrderFlowDelta,
+		FormatPrice(signal.TechnicalContext.VWAP),
+		FormatPrice(signal.TechnicalContext.PivotPoint),
+		FormatPrice(signal.TechnicalContext.PivotS1),
+		FormatPrice(signal.TechnicalContext.PivotS2),
+		FormatPrice(signal.TechnicalContext.PivotS3),
+		FormatPrice(signal.TechnicalContext.PivotR1),
+		FormatPrice(signal.TechnicalContext.PivotR2),
+		FormatPrice(signal.TechnicalContext.PivotR3),
+		signal.TechnicalContext.NearestPivot,
+		FormatPrice(signal.TechnicalContext.Fib382),
+		FormatPrice(signal.TechnicalContext.Fib500),
+		FormatPrice(signal.TechnicalContext.Fib618),
+		signal.TechnicalContext.NearestFib,
+		signal.NearestLevelDist,
+		signal.ConfluenceScore,
+		signal.ConfidenceScore*100,
 	)
 
 	// List of models to try in order (fallback)
@@ -153,14 +215,22 @@ func (s *AIService) BatchValidateSignals(signals []*model.Signal) ([]AIValidatio
 		return []AIValidationResult{}, nil
 	}
 
-	// Build batch prompt
-	prompt := `You are a senior crypto analyst. Analyze these trading signals and provide a score (0-100) and brief reason for EACH signal.
-IMPORTANT: The "reason" field MUST be in Bengali (Bangla) language.
+	// Build batch prompt with comprehensive data
+	prompt := `You are a professional crypto trading analyst. Analyze these trading signals using ALL provided data.
 
-Respond with a JSON array in this exact format:
+CRITICAL EVALUATION CRITERIA:
+1. Confluence Score >= 60 is acceptable, >= 80 is excellent
+2. Risk/Reward >= 2.0 is required
+3. Entry should be near a key level (pivot or fibonacci)
+4. Volume should confirm the move (>= 1.5x average)
+5. Consider probability metrics for confidence
+
+IMPORTANT: Provide reason in Bengali (Bangla) language.
+
+Respond with a JSON array:
 [
-  {"signal": 1, "score": <number>, "reason": "<brief reason in Bangla>"},
-  {"signal": 2, "score": <number>, "reason": "<brief reason in Bangla>"},
+  {"signal": 1, "score": <0-100>, "reason": "<analysis in Bangla>"},
+  {"signal": 2, "score": <0-100>, "reason": "<analysis in Bangla>"},
   ...
 ]
 
@@ -168,28 +238,46 @@ SIGNALS TO ANALYZE:
 `
 
 	for idx, signal := range signals {
-		prompt += fmt.Sprintf(`
---- Signal %d ---
-Symbol: %s
-Type: %s
-Tier: %s
-Entry Price: %s
-Regime: %s
-Technical Context:
-- RSI (4h/1h/15m/5m): %.2f / %.2f / %.2f / %.2f
-- ADX (4h/1h/15m): %.2f / %.2f / %.2f
-- VWAP: %.6f
-- MACD: %.6f, Signal: %.6f, Histogram: %.6f
-- Volume: Current=%.2f, Avg=%.2f (%.2fx)
-- Order Flow Delta: %.2f
+		// Calculate volume ratio safely
+		volRatio := 0.0
+		if signal.TechnicalContext.AvgVol > 0 {
+			volRatio = signal.TechnicalContext.CurrentVol / signal.TechnicalContext.AvgVol
+		}
 
+		prompt += fmt.Sprintf(`
+━━━━━━━━━━ SIGNAL %d ━━━━━━━━━━
+Symbol: %s | Direction: %s | Tier: %s | Regime: %s
+
+📈 RISK MANAGEMENT:
+Entry: %s | SL: %s (%.2f%%) | TP: %s (%.2f%%)
+R:R: %.2f | Break-even Win Rate: %.2f%% | Position: %.2f%%
+
+📊 INDICATORS:
+RSI (4H/1H/15M/5M): %.1f / %.1f / %.1f / %.1f
+ADX (4H/1H/15M): %.1f / %.1f / %.1f
+MACD Hist: %.6f | Volume: %.2fx | Order Flow: %.2f
+
+🎯 KEY LEVELS:
+Pivot: %s | S1: %s | R1: %s
+Nearest: %s (%.2f%% away)
+Fib 50%%: %s | Fib 61.8%%: %s
+
+📐 PROBABILITY:
+Confluence: %d/100 | Confidence: %.1f%%
 `,
 			idx+1,
 			signal.Symbol,
 			signal.Type,
 			signal.Tier,
-			FormatPrice(signal.EntryPrice),
 			signal.Regime,
+			FormatPrice(signal.EntryPrice),
+			FormatPrice(signal.StopLoss),
+			signal.RiskPercent,
+			FormatPrice(signal.TakeProfit),
+			signal.RewardPercent,
+			signal.RiskRewardRatio,
+			signal.BreakEvenWinRate,
+			signal.RecommendedSize,
 			signal.TechnicalContext.RSI4h,
 			signal.TechnicalContext.RSI1h,
 			signal.TechnicalContext.RSI15m,
@@ -197,14 +285,18 @@ Technical Context:
 			signal.TechnicalContext.ADX4h,
 			signal.TechnicalContext.ADX1h,
 			signal.TechnicalContext.ADX15m,
-			signal.TechnicalContext.VWAP,
-			signal.TechnicalContext.MACD,
-			signal.TechnicalContext.Signal,
 			signal.TechnicalContext.Histogram,
-			signal.TechnicalContext.CurrentVol,
-			signal.TechnicalContext.AvgVol,
-			signal.TechnicalContext.CurrentVol/signal.TechnicalContext.AvgVol,
+			volRatio,
 			signal.TechnicalContext.OrderFlowDelta,
+			FormatPrice(signal.TechnicalContext.PivotPoint),
+			FormatPrice(signal.TechnicalContext.PivotS1),
+			FormatPrice(signal.TechnicalContext.PivotR1),
+			signal.TechnicalContext.NearestPivot,
+			signal.NearestLevelDist,
+			FormatPrice(signal.TechnicalContext.Fib500),
+			FormatPrice(signal.TechnicalContext.Fib618),
+			signal.ConfluenceScore,
+			signal.ConfidenceScore*100,
 		)
 	}
 

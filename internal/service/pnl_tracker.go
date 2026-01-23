@@ -78,5 +78,11 @@ func (p *PnLTracker) GetPerformanceSummary() {
 	log.Printf("Largest Win: $%.2f | Largest Loss: $%.2f", stats.LargestWin, stats.LargestLoss)
 	log.Printf("Profit Factor: %.2f", stats.ProfitFactor)
 	log.Printf("Expected Value: $%.2f", stats.ExpectedValue)
+	log.Println("------------------------------------------")
+	log.Println("📐 PROBABILITY METRICS")
+	log.Println("------------------------------------------")
+	log.Printf("Sharpe Ratio: %.2f", stats.SharpeRatio)
+	log.Printf("Risk of Ruin: %.2f%%", stats.RiskOfRuin*100)
+	log.Printf("Optimal Position Size (Kelly): %.2f%%", stats.OptimalF)
 	log.Println("==========================================")
 }

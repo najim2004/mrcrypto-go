@@ -28,6 +28,10 @@ type PnLStats struct {
 	LargestLoss   float64
 	ProfitFactor  float64
 	ExpectedValue float64
+	// Probability-based metrics
+	SharpeRatio float64 // Risk-adjusted return
+	RiskOfRuin  float64 // Probability of account ruin
+	OptimalF    float64 // Optimal fraction to risk (Kelly)
 }
 
 // CalculatePnL calculates profit/loss for a trade
@@ -111,6 +115,26 @@ func CalculatePnLStats(trades []TradeResult) PnLStats {
 		winProb := float64(stats.WinningTrades) / float64(stats.TotalTrades)
 		lossProb := float64(stats.LosingTrades) / float64(stats.TotalTrades)
 		stats.ExpectedValue = (winProb * stats.AvgWin) - (lossProb * stats.AvgLoss)
+
+		// Calculate probability-based metrics
+		winRate := winProb // 0.0 - 1.0
+		avgRR := 1.0
+		if stats.AvgLoss > 0 {
+			avgRR = stats.AvgWin / stats.AvgLoss
+		}
+
+		// Calculate returns for Sharpe Ratio
+		returns := make([]float64, len(trades))
+		for i, trade := range trades {
+			returns[i] = trade.PnLPercent / 100.0 // Convert to decimal
+		}
+		stats.SharpeRatio = CalculateSharpeRatio(returns, 0.04) // 4% risk-free rate
+
+		// Risk of Ruin (assuming 2% risk per trade)
+		stats.RiskOfRuin = CalculateRiskOfRuin(winRate, avgRR, 2.0)
+
+		// Optimal F (Kelly fraction)
+		stats.OptimalF = CalculateOptimalF(winRate, avgRR) * 100 // Convert to percentage
 	}
 
 	return stats

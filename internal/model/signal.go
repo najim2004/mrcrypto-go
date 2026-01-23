@@ -83,13 +83,22 @@ type Signal struct {
 	TechnicalContext TechnicalContext `json:"technical_context" bson:"technical_context"`
 	AIScore          int              `json:"ai_score" bson:"ai_score"`
 	AIReason         string           `json:"ai_reason" bson:"ai_reason"`
-	Status           string           `json:"status" bson:"status"`                       // ACTIVE, CLOSED
-	CloseReason      string           `json:"close_reason,omitempty" bson:"close_reason"` // TP_HIT, SL_HIT, MANUAL, REVERSED
-	ClosedAt         *time.Time       `json:"closed_at,omitempty" bson:"closed_at"`
-	PnL              float64          `json:"pnl,omitempty" bson:"pnl"`               // Profit/Loss percentage
-	PnLAmount        float64          `json:"pnl_amount,omitempty" bson:"pnl_amount"` // PnL in USD
-	Timestamp        time.Time        `json:"timestamp" bson:"timestamp"`
-	CreatedAt        time.Time        `json:"created_at" bson:"created_at"`
+
+	// Probability Fields
+	ConfidenceScore  float64 `json:"confidence_score" bson:"confidence_score"`       // 0.0 - 1.0 probability of success
+	ConfluenceScore  int     `json:"confluence_score" bson:"confluence_score"`       // 0-100 confluence points
+	BreakEvenWinRate float64 `json:"break_even_win_rate" bson:"break_even_win_rate"` // Required win rate to break even
+	RiskPercent      float64 `json:"risk_percent" bson:"risk_percent"`               // % distance to SL
+	RewardPercent    float64 `json:"reward_percent" bson:"reward_percent"`           // % distance to TP
+	NearestLevelDist float64 `json:"nearest_level_dist" bson:"nearest_level_dist"`   // % distance to nearest key level
+
+	Status      string     `json:"status" bson:"status"`                       // ACTIVE, CLOSED
+	CloseReason string     `json:"close_reason,omitempty" bson:"close_reason"` // TP_HIT, SL_HIT, MANUAL, REVERSED
+	ClosedAt    *time.Time `json:"closed_at,omitempty" bson:"closed_at"`
+	PnL         float64    `json:"pnl,omitempty" bson:"pnl"`               // Profit/Loss percentage
+	PnLAmount   float64    `json:"pnl_amount,omitempty" bson:"pnl_amount"` // PnL in USD
+	Timestamp   time.Time  `json:"timestamp" bson:"timestamp"`
+	CreatedAt   time.Time  `json:"created_at" bson:"created_at"`
 }
 
 // Kline represents a candlestick data point
