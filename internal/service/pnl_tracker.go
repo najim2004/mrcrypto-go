@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	internalmath "my-tool-go/internal/math"
-	"my-tool-go/internal/model"
+	internalmath "mrcrypto-go/internal/math"
+	"mrcrypto-go/internal/model"
 )
 
 // PnLTracker tracks and calculates PnL for completed trades

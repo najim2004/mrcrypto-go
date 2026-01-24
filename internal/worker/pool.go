@@ -4,8 +4,8 @@ import (
 	"log"
 	"sync"
 
-	"my-tool-go/internal/model"
-	"my-tool-go/internal/service"
+	"mrcrypto-go/internal/model"
+	"mrcrypto-go/internal/service"
 )
 
 type WorkerPool struct {

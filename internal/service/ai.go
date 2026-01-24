@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"my-tool-go/internal/config"
-	"my-tool-go/internal/model"
+	"mrcrypto-go/internal/config"
+	"mrcrypto-go/internal/model"
 
 	"google.golang.org/genai"
 )

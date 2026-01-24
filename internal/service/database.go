@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"my-tool-go/internal/config"
-	"my-tool-go/internal/model"
+	"mrcrypto-go/internal/config"
+	"mrcrypto-go/internal/model"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

@@ -7,8 +7,8 @@ import (
 	"math"
 	"time"
 
-	"my-tool-go/internal/model"
-	"my-tool-go/internal/service"
+	"mrcrypto-go/internal/model"
+	"mrcrypto-go/internal/service"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

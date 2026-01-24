@@ -6,9 +6,9 @@ import (
 	"math"
 	"time"
 
-	"my-tool-go/internal/indicator"
-	internalmath "my-tool-go/internal/math"
-	"my-tool-go/internal/model"
+	"mrcrypto-go/internal/indicator"
+	internalmath "mrcrypto-go/internal/math"
+	"mrcrypto-go/internal/model"
 )
 
 type StrategyService struct {

@@ -6,9 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"my-tool-go/internal/config"
-	"my-tool-go/internal/loader"
-	"my-tool-go/internal/service"
+	"mrcrypto-go/internal/config"
+	"mrcrypto-go/internal/loader"
+	"mrcrypto-go/internal/service"
 )
 
 func main() {

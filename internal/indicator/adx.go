@@ -2,7 +2,7 @@ package indicator
 
 import (
 	"math"
-	internalmath "my-tool-go/internal/math"
+	internalmath "mrcrypto-go/internal/math"
 )
 
 // CalculateEMA calculates the Exponential Moving Average

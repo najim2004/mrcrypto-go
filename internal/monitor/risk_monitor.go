@@ -3,7 +3,7 @@ package monitor
 import (
 	"fmt"
 	"log"
-	"my-tool-go/internal/model"
+	"mrcrypto-go/internal/model"
 )
 
 type RiskMonitor struct {

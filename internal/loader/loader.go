@@ -4,9 +4,9 @@ import (
 	"log"
 	"time"
 
-	"my-tool-go/internal/model"
-	"my-tool-go/internal/service"
-	"my-tool-go/internal/worker"
+	"mrcrypto-go/internal/model"
+	"mrcrypto-go/internal/service"
+	"mrcrypto-go/internal/worker"
 
 	"github.com/robfig/cron/v3"
 )

@@ -1,6 +1,6 @@
 # Trading Bot Execution Flow
 
-This document outlines the step-by-step execution flow of the trading bot `my-tool-go`.
+This document outlines the step-by-step execution flow of the trading bot `mrcrypto-go`.
 
 ## High-Level Overview
 

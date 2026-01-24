@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"my-tool-go/internal/config"
-	"my-tool-go/internal/model"
+	"mrcrypto-go/internal/config"
+	"mrcrypto-go/internal/model"
 )
 
 type BinanceService struct {

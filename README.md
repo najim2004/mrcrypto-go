@@ -73,20 +73,20 @@ go run cmd/server/main.go
 ### Build for Production
 
 ```bash
-go build -o my-tool-go cmd/server/main.go
-./my-tool-go
+go build -o mrcrypto-go cmd/server/main.go
+./mrcrypto-go
 ```
 
 ### Build for Linux (Cross-compile from any OS)
 
 ```bash
-GOOS=linux GOARCH=amd64 go build -o my-tool-go-linux cmd/server/main.go
+GOOS=linux GOARCH=amd64 go build -o mrcrypto-go-linux cmd/server/main.go
 ```
 
 ## Project Structure
 
 ```
-my-tool-go/
+mrcrypto-go/
 ├── cmd/
 │   └── server/
 │       └── main.go              # Entry point

@@ -1,4 +1,4 @@
-module my-tool-go
+module mrcrypto-go
 
 go 1.24
 
