@@ -286,11 +286,6 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 		"gemini-2.5-flash",
 		"gemini-2.5-flash-lite",
 		"gemini-2.5-flash-tts",
-		"gemini-robotics-er-1.5-preview",
-		"gemma-3-12b",
-		"gemma-3-1b",
-		"gemma-3-27b",
-		"gemma-3-2b",
 	}
 
 	var lastError error
@@ -310,9 +305,14 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 				lastError = err
 				log.Printf("⚠️  %s - Model %s (Client %d) failed: %v", signal.Symbol, modelName, cIdx+1, err)
 
-				// If quota exceeded (429), try next client immediately
-				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "quota") {
-					log.Printf("🔄 Switching to next client due to quota limit...")
+				// If quota exceeded or key expired, try next client immediately
+				errStr := err.Error()
+				if strings.Contains(errStr, "429") ||
+					strings.Contains(errStr, "quota") ||
+					strings.Contains(errStr, "expired") ||
+					strings.Contains(errStr, "API_KEY_INVALID") ||
+					strings.Contains(errStr, "INVALID_ARGUMENT") {
+					log.Printf("🔄 Switching to next client due to error: %v", err)
 					continue
 				}
 
@@ -473,9 +473,14 @@ EXPLAIN DECISION (Professional Bangla):
 				lastError = err
 				log.Printf("⚠️  Batch validation - Model %s (Client %d) failed: %v", modelName, cIdx+1, err)
 
-				// If quota exceeded, try next client
-				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "quota") {
-					log.Printf("🔄 Switching to next client due to quota limit...")
+				// If quota exceeded or key expired, try next client
+				errStr := err.Error()
+				if strings.Contains(errStr, "429") ||
+					strings.Contains(errStr, "quota") ||
+					strings.Contains(errStr, "expired") ||
+					strings.Contains(errStr, "API_KEY_INVALID") ||
+					strings.Contains(errStr, "INVALID_ARGUMENT") {
+					log.Printf("🔄 Switching to next client due to error: %v", err)
 					continue
 				}
 				break // Try next model on other errors

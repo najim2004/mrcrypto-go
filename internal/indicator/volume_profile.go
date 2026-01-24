@@ -113,10 +113,24 @@ func CalculateVolumeProfile(klines []model.Kline, numBins int) VolumeProfile {
 			nextDownVol = bins[downIdx-1]
 		}
 
-		if nextUpVol > nextDownVol {
+		// Decide direction:
+		// 1. If we can go both ways, pick the one with higher volume
+		// 2. If we can only go up, go up
+		// 3. If we can only go down, go down
+		// 4. If neither (handled by break above), we are done
+
+		if canGoUp && canGoDown {
+			if nextUpVol >= nextDownVol { // Prefer up if equal or greater
+				currentVol += nextUpVol
+				upIdx++
+			} else {
+				currentVol += nextDownVol
+				downIdx--
+			}
+		} else if canGoUp {
 			currentVol += nextUpVol
 			upIdx++
-		} else {
+		} else if canGoDown {
 			currentVol += nextDownVol
 			downIdx--
 		}

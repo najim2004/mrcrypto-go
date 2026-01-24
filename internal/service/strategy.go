@@ -146,12 +146,14 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	log.Printf("⏳ [Strategy] %s - Calculating indicators...", symbol)
 
 	// RSI - Multi-timeframe
+	log.Printf("Debug: Calculating RSI for %s...", symbol)
 	rsi4h := indicator.GetLastRSI(closes4h, 14)
 	rsi1h := indicator.GetLastRSI(closes1h, 14)
 	rsi15m := indicator.GetLastRSI(closes15m, 14)
 	rsi5m := indicator.GetLastRSI(closes5m, 14)
 
 	// ADX - Trend strength
+	log.Printf("Debug: Calculating ADX for %s...", symbol)
 	adx4h := indicator.GetLastADX(highs4h, lows4h, closes4h, 14)
 	adx1h := indicator.GetLastADX(highs1h, lows1h, closes1h, 14)
 	adx15m := indicator.GetLastADX(highs15m, lows15m, closes15m, 14)
@@ -172,12 +174,14 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	volRatio := currentVol / avgVol
 
 	// Order Flow
+	log.Printf("Debug: Calculating Order Flow for %s...", symbol)
 	orderFlowDelta := calculateOrderFlowDelta(klines5m)
 
 	// ========================================
 	// STEP 3.1: SMC & VOLUME PROFILE
 	// ========================================
 	// SMC (Smart Money Concepts) - Use 1H for reliability
+	log.Printf("Debug: Calculating SMC for %s...", symbol)
 	fvgs := indicator.FindFVGs(klines1h)
 	obs := indicator.FindOrderBlocks(klines1h)
 
@@ -185,6 +189,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	inOB, obType := indicator.IsPriceInOB(currentPrice, obs)
 
 	// Volume Profile - Use 4H for major levels
+	log.Printf("Debug: Calculating Volume Profile for %s...", symbol)
 	vp := indicator.CalculateVolumeProfile(klines4h, 100)
 	pocDist := indicator.GetPOCDistance(currentPrice, vp.POC)
 
