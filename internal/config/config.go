@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -16,7 +17,7 @@ type Config struct {
 	BinanceBaseURL   string
 	TelegramBotToken string
 	TelegramChatID   string
-	GeminiAPIKey     string
+	GeminiAPIKeys    []string // Supports multiple keys for rotation
 }
 
 var AppConfig *Config
@@ -37,7 +38,7 @@ func Load() {
 		BinanceBaseURL:   getEnv("BINANCE_BASE_URL", "https://api.binance.com"),
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
-		GeminiAPIKey:     getEnv("GEMINI_API_KEY", ""),
+		GeminiAPIKeys:    getEnvAsSlice("GEMINI_API_KEY", ""),
 	}
 
 	log.Println("✅ Configuration loaded successfully")
@@ -49,4 +50,13 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func getEnvAsSlice(key, defaultValue string) []string {
+	value := getEnv(key, defaultValue)
+	if value == "" {
+		return nil
+	}
+	// Split by comma
+	return strings.Split(value, ",")
 }

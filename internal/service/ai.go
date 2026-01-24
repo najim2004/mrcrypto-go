@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"mrcrypto-go/internal/config"
 	"mrcrypto-go/internal/model"
@@ -13,27 +14,43 @@ import (
 )
 
 type AIService struct {
-	client *genai.Client
-	ctx    context.Context
+	clients []*genai.Client // Use slice of clients
+	ctx     context.Context
 }
 
 func NewAIService() *AIService {
 	ctx := context.Background()
+	var clients []*genai.Client
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey: config.AppConfig.GeminiAPIKey,
-	})
-	if err != nil {
-		log.Printf("⚠️  Failed to create Gemini client: %v", err)
-		return &AIService{
-			client: nil,
-			ctx:    ctx,
+	keys := config.AppConfig.GeminiAPIKeys
+	if len(keys) == 0 {
+		log.Printf("⚠️  No Gemini API keys found")
+	}
+
+	for _, key := range keys {
+		key = strings.TrimSpace(key) // Clean up whitespace
+		if key == "" {
+			continue
 		}
+		client, err := genai.NewClient(ctx, &genai.ClientConfig{
+			APIKey: key,
+		})
+		if err != nil {
+			log.Printf("⚠️  Failed to create Gemini client for key ending in ...%s: %v", key[len(key)-4:], err)
+			continue
+		}
+		clients = append(clients, client)
+	}
+
+	if len(clients) > 0 {
+		log.Printf("✅ Initialized %d Gemini clients for rotation", len(clients))
+	} else {
+		log.Printf("❌ Failed to initialize any Gemini clients")
 	}
 
 	return &AIService{
-		client: client,
-		ctx:    ctx,
+		clients: clients,
+		ctx:     ctx,
 	}
 }
 
@@ -45,8 +62,8 @@ type AIValidationResult struct {
 
 // ValidateSignal sends the signal to Gemini AI for validation with fallback models
 func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
-	if s.client == nil {
-		return 0, "", fmt.Errorf("gemini client not initialized")
+	if len(s.clients) == 0 {
+		return 0, "", fmt.Errorf("no gemini clients initialized")
 	}
 
 	// Calculate volume ratio safely
@@ -279,37 +296,44 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 	var lastError error
 
 	// Try each model until one succeeds
-	for i, modelName := range models {
-		result, err := s.client.Models.GenerateContent(
-			s.ctx,
-			modelName,
-			genai.Text(prompt),
-			nil,
-		)
+	for _, modelName := range models {
+		// Try each client (key) for rotation
+		for cIdx, client := range s.clients {
+			result, err := client.Models.GenerateContent(
+				s.ctx,
+				modelName,
+				genai.Text(prompt),
+				nil,
+			)
 
-		if err != nil {
-			lastError = err
-			log.Printf("⚠️  %s - Model %s failed, trying next model...", signal.Symbol, modelName)
+			if err != nil {
+				lastError = err
+				log.Printf("⚠️  %s - Model %s (Client %d) failed: %v", signal.Symbol, modelName, cIdx+1, err)
 
-			// If this is not the last model, continue to next
-			if i < len(models)-1 {
-				continue
+				// If quota exceeded (429), try next client immediately
+				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "quota") {
+					log.Printf("🔄 Switching to next client due to quota limit...")
+					continue
+				}
+
+				// If other error, maybe try next model
+				break // Break inner client loop to try next model
 			}
-			// Last model also failed, return error
-			return 0, "", fmt.Errorf("all gemini models failed, last error: %w", lastError)
+
+			// Success! Parse response
+			responseText := result.Text()
+
+			var aiResult AIValidationResult
+			if err := json.Unmarshal([]byte(responseText), &aiResult); err != nil {
+				log.Printf("⚠️  Failed to parse AI response for %s (model: %s): %v", signal.Symbol, modelName, err)
+				// Don't error out on parse error, maybe try next model?
+				// For now, return default
+				return 50, responseText, nil
+			}
+
+			log.Printf("✅ [AI] %s - Validated! Model: %s, Client: %d, Score: %d/100", signal.Symbol, modelName, cIdx+1, aiResult.Score)
+			return aiResult.Score, aiResult.Reason, nil
 		}
-
-		// Success! Parse response
-		responseText := result.Text()
-
-		var aiResult AIValidationResult
-		if err := json.Unmarshal([]byte(responseText), &aiResult); err != nil {
-			log.Printf("⚠️  Failed to parse AI response for %s (model: %s): %v", signal.Symbol, modelName, err)
-			return 50, responseText, nil
-		}
-
-		log.Printf("✅ [AI] %s - Validated! Model: %s, Score: %d/100", signal.Symbol, modelName, aiResult.Score)
-		return aiResult.Score, aiResult.Reason, nil
 	}
 
 	// Should never reach here, but just in case
@@ -318,8 +342,8 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 
 // BatchValidateSignals validates multiple signals in a single AI call (OPTIMIZED)
 func (s *AIService) BatchValidateSignals(signals []*model.Signal) ([]AIValidationResult, error) {
-	if s.client == nil {
-		return nil, fmt.Errorf("gemini client not initialized")
+	if len(s.clients) == 0 {
+		return nil, fmt.Errorf("no gemini clients initialized")
 	}
 
 	if len(signals) == 0 {
@@ -435,60 +459,66 @@ EXPLAIN DECISION (Professional Bangla):
 	// Try each model until one succeeds
 	for i, modelName := range models {
 		log.Printf("⏳ [AI Batch] Trying model: %s (%d/%d)...", modelName, i+1, len(models))
-		result, err := s.client.Models.GenerateContent(
-			s.ctx,
-			modelName,
-			genai.Text(prompt),
-			nil,
-		)
 
-		if err != nil {
-			lastError = err
-			log.Printf("⚠️  Batch validation - Model %s failed, trying next...", modelName)
+		// Try each client (key) for rotation
+		for cIdx, client := range s.clients {
+			result, err := client.Models.GenerateContent(
+				s.ctx,
+				modelName,
+				genai.Text(prompt),
+				nil,
+			)
 
-			if i < len(models)-1 {
-				continue
+			if err != nil {
+				lastError = err
+				log.Printf("⚠️  Batch validation - Model %s (Client %d) failed: %v", modelName, cIdx+1, err)
+
+				// If quota exceeded, try next client
+				if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "quota") {
+					log.Printf("🔄 Switching to next client due to quota limit...")
+					continue
+				}
+				break // Try next model on other errors
 			}
-			return nil, fmt.Errorf("all gemini models failed for batch validation: %w", lastError)
-		}
 
-		// Success! Parse response
-		responseText := result.Text()
+			// Success! Parse response
+			responseText := result.Text()
 
-		// Extract JSON from markdown code blocks if present
-		jsonText := extractJSONFromMarkdown(responseText)
+			// Extract JSON from markdown code blocks if present
+			jsonText := extractJSONFromMarkdown(responseText)
 
-		// Try to parse as JSON array
-		var results []struct {
-			SignalNum int    `json:"signal"`
-			Score     int    `json:"score"`
-			Reason    string `json:"reason"`
-		}
-
-		if err := json.Unmarshal([]byte(jsonText), &results); err != nil {
-			log.Printf("⚠️  Failed to parse batch AI response (model: %s): %v", modelName, err)
-			log.Printf("Response preview: %s", jsonText[:min(len(jsonText), 200)])
-			// Return default scores
-			defaultResults := make([]AIValidationResult, len(signals))
-			for idx := range defaultResults {
-				defaultResults[idx] = AIValidationResult{Score: 50, Reason: "AI parse error"}
+			// Try to parse as JSON array
+			var results []struct {
+				SignalNum int    `json:"signal"`
+				Score     int    `json:"score"`
+				Reason    string `json:"reason"`
 			}
-			return defaultResults, nil
-		}
 
-		// Convert to AIValidationResult
-		validationResults := make([]AIValidationResult, len(signals))
-		for idx, res := range results {
-			if idx < len(validationResults) {
-				validationResults[idx] = AIValidationResult{
-					Score:  res.Score,
-					Reason: res.Reason,
+			if err := json.Unmarshal([]byte(jsonText), &results); err != nil {
+				log.Printf("⚠️  Failed to parse batch AI response (model: %s): %v", modelName, err)
+				log.Printf("Response preview: %s", jsonText[:min(len(jsonText), 200)])
+				// Return default scores
+				defaultResults := make([]AIValidationResult, len(signals))
+				for idx := range defaultResults {
+					defaultResults[idx] = AIValidationResult{Score: 50, Reason: "AI parse error"}
+				}
+				return defaultResults, nil
+			}
+
+			// Convert to AIValidationResult
+			validationResults := make([]AIValidationResult, len(signals))
+			for idx, res := range results {
+				if idx < len(validationResults) {
+					validationResults[idx] = AIValidationResult{
+						Score:  res.Score,
+						Reason: res.Reason,
+					}
 				}
 			}
-		}
 
-		log.Printf("✅ [AI Batch] Successfully validated %d signals with model: %s", len(signals), modelName)
-		return validationResults, nil
+			log.Printf("✅ [AI Batch] Successfully validated %d signals with model: %s (Client %d)", len(signals), modelName, cIdx+1)
+			return validationResults, nil
+		}
 	}
 
 	return nil, fmt.Errorf("unexpected error: %w", lastError)
