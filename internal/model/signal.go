@@ -67,6 +67,13 @@ type TechnicalContext struct {
 	Fib618     float64 `json:"fib_618"`
 	Fib786     float64 `json:"fib_786"`
 	NearestFib string  `json:"nearest_fib"`
+
+	// New Improvements
+	BTCCorrelation string  `json:"btc_correlation"` // UP, DOWN
+	FVGType        string  `json:"fvg_type"`        // BULLISH, BEARISH
+	OBType         string  `json:"ob_type"`         // BULLISH, BEARISH
+	POC            float64 `json:"poc"`
+	POCDistance    float64 `json:"poc_distance"`
 }
 
 // Signal represents a trading signal

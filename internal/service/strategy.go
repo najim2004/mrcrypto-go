@@ -64,6 +64,29 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		return nil, fmt.Errorf("failed to fetch 5m klines: %w", err)
 	}
 
+	// ========================================
+	// STEP 1.1: FETCH BTC CONTEXT (Correlation)
+	// ========================================
+	var btcTrend string
+	if symbol != "BTCUSDT" {
+		btcKlines4h, err := s.binance.GetKlines("BTCUSDT", "4h", 200)
+		if err == nil {
+			btcCloses := extractCloses(btcKlines4h)
+			btcEma50 := indicator.CalculateEMA(btcCloses, 50)
+			if len(btcEma50) > 0 {
+				lastBtcPrice := btcCloses[len(btcCloses)-1]
+				lastBtcEma := btcEma50[len(btcEma50)-1]
+				if lastBtcPrice > lastBtcEma {
+					btcTrend = "UP"
+				} else {
+					btcTrend = "DOWN"
+				}
+			}
+		} else {
+			log.Printf("⚠️  [Strategy] Failed to fetch BTC klines: %v", err)
+		}
+	}
+
 	// Extract price arrays
 	closes4h := extractCloses(klines4h)
 	highs4h := extractHighs(klines4h)
@@ -152,6 +175,20 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	orderFlowDelta := calculateOrderFlowDelta(klines5m)
 
 	// ========================================
+	// STEP 3.1: SMC & VOLUME PROFILE
+	// ========================================
+	// SMC (Smart Money Concepts) - Use 1H for reliability
+	fvgs := indicator.FindFVGs(klines1h)
+	obs := indicator.FindOrderBlocks(klines1h)
+
+	inFVG, fvgType := indicator.IsPriceInFVG(currentPrice, fvgs)
+	inOB, obType := indicator.IsPriceInOB(currentPrice, obs)
+
+	// Volume Profile - Use 4H for major levels
+	vp := indicator.CalculateVolumeProfile(klines4h, 100)
+	pocDist := indicator.GetPOCDistance(currentPrice, vp.POC)
+
+	// ========================================
 	// STEP 4: REGIME DETECTION
 	// ========================================
 	regime := detectRegimePro(adx4h, adx1h, currentPrice, ema50Value)
@@ -174,12 +211,26 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		return nil, nil
 	}
 
+	// BTC Correlation Filter
+	startScore := 0
+	if btcTrend != "" {
+		if (signalDir == "LONG" && btcTrend == "DOWN") || (signalDir == "SHORT" && btcTrend == "UP") {
+			log.Printf("⚠️  [Strategy] %s - Contra Bitcoin trend (%s vs BTC %s). Penalty applied.", symbol, signalDir, btcTrend)
+			startScore = -20 // Heavy penalty for trading against BTC
+		} else {
+			startScore = 15 // Bonus for aligning with BTC
+		}
+	} else if symbol == "BTCUSDT" {
+		startScore = 15 // BTC is always correlated with itself
+	}
+
 	score := calculateConfluenceScore(
 		signalDir, regime,
 		rsi4h, rsi1h, rsi15m, rsi5m,
 		adx4h, adx1h, adx15m,
 		histogram, volRatio, orderFlowDelta,
 		currentPrice, pivotPoints, fibLevels,
+		startScore, inFVG, fvgType, inOB, obType, pocDist,
 	)
 
 	log.Printf("📊 [Strategy] %s - Confluence Score: %d/100 (Dir: %s)", symbol, score, signalDir)
@@ -298,6 +349,15 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// ========================================
 	// STEP 10: BUILD SIGNAL WITH PROBABILITY DATA
 	// ========================================
+	// Populate SMC/VP context
+	smcFVGType := ""
+	if inFVG {
+		smcFVGType = fvgType
+	}
+	smcOBType := ""
+	if inOB {
+		smcOBType = obType
+	}
 	signalType := model.SignalTypeLong
 	if signalDir == "SHORT" {
 		signalType = model.SignalTypeShort
@@ -333,6 +393,12 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		Fib618:         fibLevels.Level618,
 		Fib786:         fibLevels.Level786,
 		NearestFib:     nearestFibName,
+		// New Context
+		BTCCorrelation: btcTrend,
+		FVGType:        smcFVGType,
+		OBType:         smcOBType,
+		POC:            vp.POC,
+		POCDistance:    pocDist,
 	}
 
 	signal := &model.Signal{
@@ -410,8 +476,9 @@ func calculateConfluenceScore(
 	adx4h, adx1h, adx15m float64,
 	histogram, volRatio, orderFlow float64,
 	price float64, pivots internalmath.PivotPoints, fibs internalmath.FibonacciLevels,
+	startScore int, inFVG bool, fvgType string, inOB bool, obType string, pocDist float64,
 ) int {
-	score := 0
+	score := startScore
 
 	// 1. Trend Alignment (4H + 1H same direction) - 25 points
 	if regime == model.RegimeTrendingUp || regime == model.RegimeTrendingDown {
@@ -470,6 +537,25 @@ func calculateConfluenceScore(
 		score += 10
 	} else if direction == "SHORT" && orderFlow < 0 {
 		score += 10
+	}
+
+	// 7. SMC (Smart Money Concepts) - 25 points max
+	if inOB {
+		if (direction == "LONG" && obType == "BULLISH") || (direction == "SHORT" && obType == "BEARISH") {
+			score += 15 // Order Block retest is strong
+		}
+	}
+	if inFVG {
+		if (direction == "LONG" && fvgType == "BULLISH") || (direction == "SHORT" && fvgType == "BEARISH") {
+			score += 10
+		}
+	}
+
+	// 8. Volume Profile (POC) - 15 points
+	if pocDist <= 1.5 {
+		score += 15 // Near high volume node = high interest
+	} else if pocDist <= 3.0 {
+		score += 5
 	}
 
 	return score

@@ -619,13 +619,11 @@ func escapeHTML(s string) string {
 // formatSignalMessage creates a formatted message for Telegram in Bangla with trading guidance
 func formatSignalMessage(signal *model.Signal) string {
 	// Emoji based on signal type and tier
-	var signalEmoji, tierEmoji, directionText string
+	var signalEmoji, tierEmoji string
 	if signal.Type == model.SignalTypeLong {
 		signalEmoji = "🟢"
-		directionText = "লং (BUY)"
 	} else {
 		signalEmoji = "🔴"
-		directionText = "শর্ট (SELL)"
 	}
 
 	if signal.Tier == model.TierPremium {
@@ -634,151 +632,31 @@ func formatSignalMessage(signal *model.Signal) string {
 		tierEmoji = "✅"
 	}
 
-	// Calculate volume ratio safely
-	volRatio := 0.0
-	if signal.TechnicalContext.AvgVol > 0 {
-		volRatio = signal.TechnicalContext.CurrentVol / signal.TechnicalContext.AvgVol
-	}
-
-	// Regime translation
-	regimeText := signal.Regime
-	switch signal.Regime {
-	case "TRENDING_UP":
-		regimeText = "📈 আপট্রেন্ড"
-	case "TRENDING_DOWN":
-		regimeText = "📉 ডাউনট্রেন্ড"
-	case "RANGING":
-		regimeText = "↔️ রেঞ্জিং"
-	}
-
-	// RSI status
-	rsiStatus := "স্বাভাবিক"
-	if signal.TechnicalContext.RSI1h > 70 {
-		rsiStatus = "⚠️ ওভারবট"
-	} else if signal.TechnicalContext.RSI1h < 30 {
-		rsiStatus = "⚠️ ওভারসোল্ড"
-	} else if signal.TechnicalContext.RSI1h >= 50 && signal.TechnicalContext.RSI1h <= 65 {
-		rsiStatus = "✅ বুলিশ জোন"
-	} else if signal.TechnicalContext.RSI1h >= 35 && signal.TechnicalContext.RSI1h < 50 {
-		rsiStatus = "✅ বিয়ারিশ জোন"
-	}
-
-	// ADX status
-	adxStatus := "দুর্বল"
-	if signal.TechnicalContext.ADX1h >= 30 {
-		adxStatus = "🔥 অত্যন্ত শক্তিশালী"
-	} else if signal.TechnicalContext.ADX1h >= 25 {
-		adxStatus = "💪 শক্তিশালী"
-	} else if signal.TechnicalContext.ADX1h >= 20 {
-		adxStatus = "✅ মাঝারি"
-	}
-
-	// Volume status
-	volStatus := "কম"
-	if volRatio >= 2.0 {
-		volStatus = "🔥 উচ্চ"
-	} else if volRatio >= 1.5 {
-		volStatus = "✅ ভালো"
-	} else if volRatio >= 1.0 {
-		volStatus = "স্বাভাবিক"
-	}
-
 	// Escape AI reason
 	aiReason := escapeHTML(signal.AIReason)
 
 	// Confidence level
-	confidenceLevel := "মাঝারি"
+	confidenceLevel := "MEDIUM"
 	if signal.ConfidenceScore >= 0.75 {
-		confidenceLevel = "🔥 উচ্চ"
+		confidenceLevel = "🔥 HIGH"
 	} else if signal.ConfidenceScore >= 0.60 {
-		confidenceLevel = "✅ ভালো"
+		confidenceLevel = "✅ GOOD"
 	}
 
-	message := fmt.Sprintf(`%s <b>%s সিগন্যাল</b> %s
+	message := fmt.Sprintf(`%s <b>%s SIGNAL</b> %s
+	
+<b>%s</b> | %s
 
-╔═══════════════════════════════╗
-         <b>%s</b>
-         <b>%s</b>
-╚═══════════════════════════════╝
+🚀 <b>ENTRY:</b> <code>%s</code>
+🛑 <b>SL:</b> <code>%s</code> (%.2f%%)
 
-┏━━━ 💰 <b>ট্রেড সেটআপ</b> (ট্যাপ করে কপি করুন) ━━━┓
+🎯 <b>TP 1:</b> <code>%s</code> (%.2f%%)
+🏆 <b>TP 2:</b> <code>%s</code> (%.2f%%)
 
-🎯 <b>এন্ট্রি:</b>     <code>%s</code>
-🛑 <b>স্টপ লস:</b>     <code>%s</code> (−%.2f%%)
+📊 <b>CONFIDENCE:</b> %.0f%% (%s)
 
-🏆 <b>TP 1:</b>      <code>%s</code> (+%.2f%%)
-   <i>(৫০%% বুক করুন & SL ব্রেক-ইভেনে)</i>
-
-🏆 <b>TP 2:</b>      <code>%s</code> (+%.2f%%)
-   <i>(বাকি ৫০%% বুক করুন)</i>
-
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-┏━━━ 📊 <b>রিস্ক ম্যানেজমেন্ট</b> ━━━┓
-
-⚖️ <b>R:R রেশিও:</b>      1:%.1f (সর্বোচ্চ)
-🎲 <b>ব্রেক-ইভেন WR:</b>  %.1f%%
-💼 <b>পজিশন সাইজ:</b>    %.1f%%
-
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-┏━━━ 📈 <b>টেকনিক্যাল ডেটা</b> ━━━┓
-
-<b>RSI:</b> 4H: %.1f | 1H: %.1f | 15M: %.1f | 5M: %.1f
-       %s
-
-<b>ADX:</b> 4H: %.1f | 1H: %.1f | 15M: %.1f
-       %s
-
-<b>ভলিউম:</b> %.2fx গড় (%s)
-<b>MACD:</b> %.6f
-<b>অর্ডার ফ্লো:</b> %.2f
-
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-┏━━━ 🎯 <b>কী লেভেল</b> ━━━┓
-
-<b>পিভট:</b>
-• R3: <code>%s</code>
-• R2: <code>%s</code>
-• R1: <code>%s</code>
-• PP: <code>%s</code>
-• S1: <code>%s</code>
-• S2: <code>%s</code>
-• S3: <code>%s</code>
-• নিকটতম: %s
-
-<b>ফিবোনাচ্চি:</b>
-• 38.2%%: <code>%s</code>
-• 50.0%%: <code>%s</code>
-• 61.8%%: <code>%s</code>
-• নিকটতম: %s (%.2f%% দূরে)
-
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-┏━━━ 🧠 <b>AI বিশ্লেষণ</b> ━━━┓
-
-🎯 <b>কনফ্লুয়েন্স:</b> %d/100
-📊 <b>কনফিডেন্স:</b> %.0f%% (%s)
-🤖 <b>AI স্কোর:</b> %d/100
-
-💭 %s
-
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-┏━━━ ⚡ <b>ট্রেডিং গাইড</b> ━━━┓
-
-✅ মার্কেট অর্ডারে এন্ট্রি নিন
-✅ স্টপ লস সাথে সাথে সেট করুন
-✅ TP 1 হিট করলে ৫০%% প্রফিট বুক করুন
-✅ বাকি ৫০%% এর জন্য SL এন্ট্রি প্রাইসে আনুন
-✅ TP 2 তে সম্পূর্ণ ক্লোজ করুন
-
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-
-<b>মার্কেট:</b> %s
-<b>টায়ার:</b> %s %s
-<b>সময়:</b> %s
+🤖 <b>ANALYSIS:</b>
+%s
 
 #%s #%s #MrCrypto
 `,
@@ -786,7 +664,7 @@ func formatSignalMessage(signal *model.Signal) string {
 		signal.Type,
 		tierEmoji,
 		signal.Symbol,
-		directionText,
+		signal.Tier,
 		FormatPrice(signal.EntryPrice),
 		FormatPrice(signal.StopLoss),
 		signal.RiskPercent,
@@ -794,44 +672,9 @@ func formatSignalMessage(signal *model.Signal) string {
 		signal.TP1Percent,
 		FormatPrice(signal.TakeProfit2),
 		signal.TP2Percent,
-		signal.RiskRewardRatio,
-		signal.BreakEvenWinRate,
-		signal.RecommendedSize,
-		signal.TechnicalContext.RSI4h,
-		signal.TechnicalContext.RSI1h,
-		signal.TechnicalContext.RSI15m,
-		signal.TechnicalContext.RSI5m,
-		rsiStatus,
-		signal.TechnicalContext.ADX4h,
-		signal.TechnicalContext.ADX1h,
-		signal.TechnicalContext.ADX15m,
-		adxStatus,
-		volRatio,
-		volStatus,
-		signal.TechnicalContext.Histogram,
-		signal.TechnicalContext.OrderFlowDelta,
-		FormatPrice(signal.TechnicalContext.PivotR3),
-		FormatPrice(signal.TechnicalContext.PivotR2),
-		FormatPrice(signal.TechnicalContext.PivotR1),
-		FormatPrice(signal.TechnicalContext.PivotPoint),
-		FormatPrice(signal.TechnicalContext.PivotS1),
-		FormatPrice(signal.TechnicalContext.PivotS2),
-		FormatPrice(signal.TechnicalContext.PivotS3),
-		signal.TechnicalContext.NearestPivot,
-		FormatPrice(signal.TechnicalContext.Fib382),
-		FormatPrice(signal.TechnicalContext.Fib500),
-		FormatPrice(signal.TechnicalContext.Fib618),
-		signal.TechnicalContext.NearestFib,
-		signal.NearestLevelDist,
-		signal.ConfluenceScore,
 		signal.ConfidenceScore*100,
 		confidenceLevel,
-		signal.AIScore,
 		aiReason,
-		regimeText,
-		tierEmoji,
-		signal.Tier,
-		signal.Timestamp.Format("15:04, 02 Jan 2006"),
 		signal.Symbol,
 		signal.Type,
 	)

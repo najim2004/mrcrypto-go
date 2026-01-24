@@ -1,132 +1,129 @@
-# Trading Bot Execution Flow
+# Trading Bot Execution Flow (Visual)
 
-This document outlines the step-by-step execution flow of the trading bot `mrcrypto-go`.
+This flowchart visualizes the complete logic of the `mrcrypto-go` trading bot.
 
-## High-Level Overview
-
-1. **Initialization**: Services (Binance, Strategy, AI, Database, Telegram) are initialized.
-2. **Scheduler**: A cron job triggers the polling cycle every **1 minute**.
-3. **Polling Cycle**:
-   - Fetches target symbols from Binance.
-   - Distributes symbols to a **Worker Pool** (parallel processing).
-   - Workers evaluate each symbol using the **Strategy**.
-   - Valid signals are collected.
-4. **Filtering**: Signals are filtered by **Cooldown** (4 hours).
-5. **Validation**: Remaining signals are validated by **Google Gemini AI**.
-6. **Action**: Approved signals (Score ≥ 70) are saved to MongoDB and sent to Telegram.
-
----
-
-## Detailed Flowchart
-
-```mermaid
-graph TD
-    Start([Start Loop @ 1min]) --> FetchSymbols[Fetch Symbols (Binance)]
-    FetchSymbols --> WorkerPool[Distribute to Worker Pool]
-    
-    subgraph "Worker Logic (Per Symbol)"
-        WorkerPool --> FetchData[Fetch Klines (4h, 1h, 15m, 5m)]
-        FetchData --> CheckData{Data Sufficient?}
-        CheckData -- No --> StopWorker([Stop / Next Symbol])
-        CheckData -- Yes --> CalcInd[Calculate Indicators\n(RSI, ADX, VWAP, MACD)]
-        
-        CalcInd --> DetectRegime[Detect Market Regime]
-        DetectRegime --> CheckChoppy{ADX < 20?}
-        CheckChoppy -- Yes (Choppy) --> StopWorker
-        CheckChoppy -- No --> CheckPremium{Check PREMIUM Tier}
-        
-        CheckPremium -- Pass --> CreatePremium[Create PREMIUM Signal]
-        CheckPremium -- Fail --> CheckStandard{Check STANDARD Tier}
-        
-        CheckStandard -- Pass --> CreateStandard[Create STANDARD Signal]
-        CheckStandard -- Fail --> StopWorker
-        
-        CreatePremium --> ReturnSignal([Return Signal])
-        CreateStandard --> ReturnSignal
-    end
-    
-    ReturnSignal --> CollectSignals[Collect All Signals]
-    CollectSignals --> CountCheck{Signals > 0?}
-    CountCheck -- No --> EndCycle([End Cycle])
-    
-    CountCheck -- Yes --> FilterCooldown[Filter: Check Cooldown]
-    
-    subgraph "Main Process Logic"
-        FilterCooldown --> CooldownCheck{Cooldown Active?\n(Last 4 Hours)}
-        CooldownCheck -- Yes --> LogSkip[Log: Skipped (Cooldown)]
-        CooldownCheck -- No --> AddToBatch[Add to AI Batch]
-        
-        LogSkip --> NextSignal
-        AddToBatch --> NextSignal{More Signals?}
-        NextSignal -- Yes --> FilterCooldown
-        NextSignal -- No --> BatchAI[AI Batch Validation]
-    end
-    
-    BatchAI --> AIResults[Process AI Results]
-    AIResults --> ScoreCheck{Score >= 70?}
-    
-    ScoreCheck -- No --> LogLowScore[Log: Score Too Low]
-    ScoreCheck -- Yes --> SaveDB[Save to MongoDB]
-    
-    SaveDB --> SendTelegram[Send Telegram Notification]
-    SendTelegram --> EndCycle
-    LogLowScore --> EndCycle
+```text
++=================================================================================+
+|                                      START                                      |
+|                       (Cron Job triggers every 1 Minute)                        |
++=======================================+=========================================+
+                                        |
+                                        v
+                            +-----------------------+
+                            | 1. FETCH GLOBAL DATA  |
+                            |   Get BTCUSDT (4H)    |
+                            +-----------+-----------+
+                                        |
+                                        v
+                            +-----------------------+
+                            | 2. DISTRIBUTE TASKS   |
+                            |  Send Symbols to Pool |
+                            +-----------+-----------+
+                                        |
+                                        | (Worker execution per symbol)
+                                        v
++---------------------------------------------------------------------------------+
+|                                 WORKER LOGIC                                    |
++---------------------------------------------------------------------------------+
+|                                                                                 |
+|  +-----------------------+      +-----------------------+                       |
+|  | 3. FETCH KLINES       | ---> | 4. CHECK DATA         | --NO--> [ STOP ]      |
+|  | (1D, 4H, 1H, 15M, 5M) |      | Are arrays full?      |                       |
+|  +-----------------------+      +-----------+-----------+                       |
+|                                             | YES                               |
+|                                             v                                   |
+|                                 +-----------------------+                       |
+|                                 | 5. CALC KEY LEVELS    |                       |
+|                                 | • Pivot Points (Daily)|                       |
+|                                 | • Fib Levels (4H)     |                       |
+|                                 +-----------+-----------+                       |
+|                                             |                                   |
+|                                             v                                   |
+|  +-----------------------+      +-----------------------+                       |
+|  | 7. ADVANCED INDICATORS| <--- | 6. CALC INDICATORS    |                       |
+|  | • SMC (OB, FVG)       |      | • RSI, ADX, MACD      |                       |
+|  | • Volume Profile (POC)|      | • VWAP, Order Flow    |                       |
+|  +-----------+-----------+      +-----------------------+                       |
+|              |                                                                  |
+|              v                                                                  |
+|  +-----------------------+      +-----------------------+                       |
+|  | 8. MARKET REGIME      | ---> | 9. CHECK CHOPPY       | --YES-> [ STOP ]      |
+|  | (Trending/Ranging?)   |      | Is ADX < 15?          |                       |
+|  +-----------------------+      +-----------+-----------+                       |
+|                                             | NO                                |
+|                                             v                                   |
+|                                 +-----------------------+                       |
+|                                 | 10. DETERMINE DIR     |                       |
+|                                 | LONG / SHORT / NONE   | --NONE-> [ STOP ]     |
+|                                 +-----------+-----------+                       |
+|                                             |                                   |
+|                                             v                                   |
+|                                 +-----------------------+                       |
+|                                 | 11. BTC CHECK         |                       |
+|                                 | Align with BTC Trend? |                       |
+|                                 +-----------+-----------+                       |
+|                                    /                 \                          |
+|                             (Aligned)              (Contra)                     |
+|                           [ +15 Points ]         [ -20 Penalty ]                |
+|                                    \                 /                          |
+|                                     v               v                           |
+|                                 +-----------------------+                       |
+|                                 | 12. SCORING SYSTEM    |                       |
+|                                 | • Trend & RSI         |                       |
+|                                 | • SMC (OB/FVG) [+15]  |                       |
+|                                 | • Vol Profile [+15]   |                       |
+|                                 +-----------+-----------+                       |
+|                                             |                                   |
+|                                             v                                   |
+|  +-----------------------+      +-----------------------+                       |
+|  | 14. CHECK TIERS       | <--- | 13. SCORE CHECK       | --NO--> [ STOP ]      |
+|  | • Premium (Score>=80) |      | Is Score >= 60?       |                       |
+|  | • Standard(Score>=60) |      +-----------------------+                       |
+|  +-----------+-----------+                                                      |
+|              |                                                                  |
+|              v                                                                  |
+|  +-----------------------+      +-----------------------+                       |
+|  | 15. RISK CALCULATION  | ---> | 16. VALIDATE R:R      | --NO--> [ STOP ]      |
+|  | • SL (2%), TP (6%)    |      | Is R:R >= 2.0?        |                       |
+|  +-----------------------+      +-----------+-----------+                       |
+|                                             | YES                               |
+|                                             v                                   |
+|                                        [ RETURN SIGNAL ]                        |
+|                                                                                 |
++=================================================================================+
+                                        |
+                                        v
+                            +-----------------------+
+                            | 17. PROCESS SIGNALS   |
+                            | Collect valid outputs |
+                            +-----------+-----------+
+                                        |
+                                        v
+                            +-----------------------+
+                            | 18. AI FILTER (Gemini)|
+                            | Validate Logic        |
+                            +-----------+-----------+
+                                   |          |
+                                (Low)       (High)
+                                  |           |
+                              [ DROP ]    +=================+
+                                          | ✅ SAVE & SEND |
+                                          | (DB + Telegram) |
+                                          +=================+
 ```
 
----
+## Flow Description
 
-## Decision Logic & Thresholds
-
-### 1. Market Regime Detection
-| Condition | Regime | Action |
-| :--- | :--- | :--- |
-| **ADX (4h) < 20** | `Choppy` | ❌ **STOP** (No trades) |
-| Price > EMA50 | `Trending Up` | Potential **LONG** |
-| Price < EMA50 | `Trending Down` | Potential **SHORT** |
-| Price == EMA50 | `Ranging` | Skip |
-
-### 2. Tier Evaluation (Worker Level)
-
-#### **PREMIUM Tier** (Checked First)
-*If ALL conditions are true:*
-*   **ADX (1h)** ≥ 25
-*   **Volume** ≥ 2.0x Average Volume
-*   **Trending Up (LONG)**:
-    *   RSI (1h): 50 - 65
-    *   RSI (5m): 40 - 70
-    *   Order Flow > 0
-    *   MACD Histogram > 0
-*   **Trending Down (SHORT)**:
-    *   RSI (1h): 35 - 50
-    *   RSI (5m): 30 - 60
-    *   Order Flow < 0
-    *   MACD Histogram < 0
-
-#### **STANDARD Tier** (Checked if Premium Fails)
-*If ALL conditions are true:*
-*   **ADX (1h)** ≥ 20
-*   **Volume** ≥ 1.0x Average Volume
-*   **Trending Up (LONG)**:
-    *   RSI (1h): 40 - 70
-    *   RSI (5m): 35 - 75
-    *   MACD Histogram > 0
-*   **Trending Down (SHORT)**:
-    *   RSI (1h): 30 - 60
-    *   RSI (5m): 25 - 65
-    *   MACD Histogram < 0
-
-### 3. Filters & Validation (Main Process)
-
-*   **Cooldown**: If a signal was generated for this symbol in the last **4 Hours**, it is skipped.
-*   **AI Validation**:
-    *   **Input**: Technical indicators (RSI, ADX, VWAP, MACD, Volume) for the signal.
-    *   **Threshold**: `Score ≥ 70`
-    *   **Action**:
-        *   Pass: Proceed to Save/Send.
-        *   Fail: Log "AI score too low" and discard.
-
-### 4. Risk Management (Signal Creation)
-
-*   **Stop Loss (SL)**: 2% from Entry.
-*   **Take Profit (TP)**: 6% from Entry.
-*   **Risk/Reward**: 1:3
+1.  **Global Data**: The system first checks the general market health by analyzing Bitcoin's 4-hour trend.
+2.  **Worker Distribution**: Each coin is processed in parallel to ensure speed.
+3.  **Data Fetching**: We fetch 5 different timeframes of data (1D, 4H, 1H, 15m, 5m).
+4.  **Indicator Logic**: We calculate standard indicators (RSI, MACD) and advanced ones (Smart Money Concepts, Volume Profile).
+5.  **Scoring**:
+    *   **BTC Alignment**: We reward following the market leader (+15) and punish fighting it (-20).
+    *   **SMC Bonus**: If price is in an Order Block, we add +15 points.
+    *   **VP Bonus**: If price is near the Point of Control (Highest Volume), we add +15 points.
+6.  **Gatekeeping**:
+    *   If Score < 60 -> **Reject**
+    *   If Risk:Reward < 1:2 -> **Reject**
+    *   If Market is Choppy (ADX < 15) -> **Reject**
+7.  **AI Final Check**: Gemini acts as a final filter to remove false positives.

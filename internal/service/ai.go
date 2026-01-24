@@ -373,8 +373,11 @@ Pivot: %s | S1: %s | R1: %s
 Nearest: %s (%.2f%% away)
 Fib 50%%: %s | Fib 61.8%%: %s
 
-📐 PROBABILITY:
+📐 PROBABILITY & CONFLUENCE:
 Confluence: %d/100 | Confidence: %.1f%%
+BTC: %s | SMC OB: %s | FVG: %s | POC: %s (%.2f%%)
+
+EXPLAIN DECISION (Professional Bangla):
 `,
 			idx+1,
 			signal.Symbol,
@@ -408,6 +411,11 @@ Confluence: %d/100 | Confidence: %.1f%%
 			FormatPrice(signal.TechnicalContext.Fib618),
 			signal.ConfluenceScore,
 			signal.ConfidenceScore*100,
+			signal.TechnicalContext.BTCCorrelation,
+			signal.TechnicalContext.OBType,
+			signal.TechnicalContext.FVGType,
+			FormatPrice(signal.TechnicalContext.POC),
+			signal.TechnicalContext.POCDistance,
 		)
 	}
 
