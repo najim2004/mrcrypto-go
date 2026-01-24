@@ -213,32 +213,68 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	}
 
 	// ========================================
-	// STEP 8: CALCULATE ATR-BASED SL/TP
 	// ========================================
-	var stopLoss, takeProfit float64
-	atrMultiplierSL := 1.5
-	atrMultiplierTP := 3.0 // 2:1 R:R minimum
+	// STEP 8: CALCULATE SL/TP WITH PROPER R:R
+	// ========================================
+	var stopLoss, takeProfit1, takeProfit2 float64
+
+	// Use percentage-based SL/TP for consistent R:R
+	// SL: 2%
+	// TP1: 3% (1:1.5 R:R) -> Book 50%
+	// TP2: 6% (1:3 R:R) -> Book 50%
+	slPercent := 2.0 / 100.0
+	tp1Percent := 3.0 / 100.0
+	tp2Percent := 6.0 / 100.0
+
+	// Adjust based on ATR volatility
+	atrPercent := (atr1h / currentPrice) * 100
+	if atrPercent > 3.0 {
+		// High volatility - use wider stops/targets
+		slPercent = 3.0 / 100.0
+		tp1Percent = 4.5 / 100.0
+		tp2Percent = 9.0 / 100.0
+	} else if atrPercent < 1.0 {
+		// Low volatility - use tighter stops/targets
+		slPercent = 1.5 / 100.0
+		tp1Percent = 2.25 / 100.0
+		tp2Percent = 4.5 / 100.0
+	}
 
 	if signalDir == "LONG" {
-		stopLoss = currentPrice - (atr1h * atrMultiplierSL)
-		// TP at next resistance or ATR target
-		tpATR := currentPrice + (atr1h * atrMultiplierTP)
+		// LONG calculation
+		stopLoss = currentPrice * (1 - slPercent)
+		takeProfit1 = currentPrice * (1 + tp1Percent)
+		takeProfit2 = currentPrice * (1 + tp2Percent)
+
+		// Optional: Adjust TP2 to resistance if meaningful
 		tpPivot := getNextResistance(currentPrice, pivotPoints)
-		takeProfit = math.Max(tpATR, tpPivot)
+		if tpPivot > takeProfit2 && tpPivot < currentPrice*1.15 {
+			takeProfit2 = tpPivot
+			// Recalculate TP2 percent if adjusted
+			tp2Percent = (takeProfit2 - currentPrice) / currentPrice
+		}
 	} else {
-		stopLoss = currentPrice + (atr1h * atrMultiplierSL)
-		// TP at next support or ATR target
-		tpATR := currentPrice - (atr1h * atrMultiplierTP)
+		// SHORT calculation
+		stopLoss = currentPrice * (1 + slPercent)
+		takeProfit1 = currentPrice * (1 - tp1Percent)
+		takeProfit2 = currentPrice * (1 - tp2Percent)
+
+		// Optional: Adjust TP2 to support if meaningful
 		tpPivot := getNextSupport(currentPrice, pivotPoints)
-		takeProfit = math.Min(tpATR, tpPivot)
+		if tpPivot < takeProfit2 && tpPivot > currentPrice*0.85 {
+			takeProfit2 = tpPivot
+			// Recalculate TP2 percent if adjusted
+			tp2Percent = (currentPrice - takeProfit2) / currentPrice // absolute % change
+		}
 	}
 
 	// ========================================
 	// STEP 9: RISK MANAGEMENT & PROBABILITY
 	// ========================================
-	rrResult := internalmath.CalculateRiskReward(currentPrice, stopLoss, takeProfit)
+	// Calculate R:R based on TP2 (Main Target)
+	rrResult := internalmath.CalculateRiskReward(currentPrice, stopLoss, takeProfit2)
 
-	// Minimum 2:1 R:R required
+	// Minimum 2:1 R:R required (based on final target)
 	if rrResult.Ratio < 2.0 {
 		log.Printf("⏭️  [Strategy] %s - R:R too low (%.2f < 2.0)", symbol, rrResult.Ratio)
 		return nil, nil
@@ -248,9 +284,10 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	signalProbability := internalmath.CalculateSignalProbability(score)
 	breakEvenWinRate := internalmath.CalculateBreakEvenWinRate(rrResult.Ratio)
 
-	// Calculate risk and reward percentages
+	// Calculate percentages
 	riskPercent := math.Abs(currentPrice-stopLoss) / currentPrice * 100
-	rewardPercent := math.Abs(takeProfit-currentPrice) / currentPrice * 100
+	rewardPercent := math.Abs(takeProfit2-currentPrice) / currentPrice * 100
+	tp1PercentVal := math.Abs(takeProfit1-currentPrice) / currentPrice * 100
 
 	// Calculate nearest level distance
 	nearestLevelDist := math.Min(pivotProximity, fibProximity)
@@ -304,7 +341,9 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		Tier:             tier,
 		EntryPrice:       currentPrice,
 		StopLoss:         stopLoss,
-		TakeProfit:       takeProfit,
+		TakeProfit:       takeProfit2, // Main TP for legacy consistency
+		TakeProfit1:      takeProfit1,
+		TakeProfit2:      takeProfit2,
 		RiskRewardRatio:  rrResult.Ratio,
 		RecommendedSize:  recommendedSize,
 		Regime:           string(regime),
@@ -315,15 +354,17 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		BreakEvenWinRate: breakEvenWinRate,
 		RiskPercent:      riskPercent,
 		RewardPercent:    rewardPercent,
+		TP1Percent:       tp1PercentVal,
+		TP2Percent:       rewardPercent, // Same as RewardPercent
 		NearestLevelDist: nearestLevelDist,
 		// Status
 		Status:    "ACTIVE",
 		Timestamp: time.Now(),
 	}
 
-	log.Printf("✨ [Strategy] %s - %s signal! Score: %d (%.0f%% prob), Tier: %s, R:R: %.2f, Entry: %s, SL: %s (%.2f%%), TP: %s (%.2f%%)",
+	log.Printf("✨ [Strategy] %s - %s signal! Score: %d (%.0f%% prob), Tier: %s, R:R: %.2f, Entry: %s, SL: %s (%.2f%%), TP1: %s, TP2: %s",
 		symbol, signalDir, score, signalProbability*100, tier, rrResult.Ratio,
-		FormatPrice(currentPrice), FormatPrice(stopLoss), riskPercent, FormatPrice(takeProfit), rewardPercent)
+		FormatPrice(currentPrice), FormatPrice(stopLoss), riskPercent, FormatPrice(takeProfit1), FormatPrice(takeProfit2))
 
 	return signal, nil
 }

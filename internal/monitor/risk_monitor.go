@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"fmt"
 	"log"
 	"my-tool-go/internal/model"
 )
@@ -69,10 +70,10 @@ func (rm *RiskMonitor) GetRiskSummary(activeSignals []*model.Signal) string {
 
 	summary := "📊 Risk Monitor Summary\n"
 	summary += "------------------------\n"
-	summary += "Active Trades: " + string(rune(len(activeSignals))) + "/" + string(rune(rm.maxOpenTrades)) + "\n"
-	summary += "Total Risk: " + string(rune(int(totalRisk))) + "%\n"
-	summary += "Risk Limit: " + string(rune(int(rm.maxRiskPercentage))) + "%\n"
-	summary += "Available Risk: " + string(rune(int(rm.maxRiskPercentage-totalRisk))) + "%"
+	summary += fmt.Sprintf("Active Trades: %d/%d\n", len(activeSignals), rm.maxOpenTrades)
+	summary += fmt.Sprintf("Total Risk: %.2f%%\n", totalRisk)
+	summary += fmt.Sprintf("Risk Limit: %.2f%%\n", rm.maxRiskPercentage)
+	summary += fmt.Sprintf("Available Risk: %.2f%%", rm.maxRiskPercentage-totalRisk)
 
 	return summary
 }

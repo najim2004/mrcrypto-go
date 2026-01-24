@@ -76,7 +76,9 @@ type Signal struct {
 	Tier             SignalTier       `json:"tier" bson:"tier"`
 	EntryPrice       float64          `json:"entry_price" bson:"entry_price"`
 	StopLoss         float64          `json:"stop_loss" bson:"stop_loss"`
-	TakeProfit       float64          `json:"take_profit" bson:"take_profit"`
+	TakeProfit       float64          `json:"take_profit" bson:"take_profit"`     // Legacy - same as TP2
+	TakeProfit1      float64          `json:"take_profit_1" bson:"take_profit_1"` // TP1: 50% position close
+	TakeProfit2      float64          `json:"take_profit_2" bson:"take_profit_2"` // TP2: remaining 50% close
 	RiskRewardRatio  float64          `json:"risk_reward_ratio" bson:"risk_reward_ratio"`
 	RecommendedSize  float64          `json:"recommended_size" bson:"recommended_size"` // Position size as % of account
 	Regime           string           `json:"regime" bson:"regime"`
@@ -89,7 +91,9 @@ type Signal struct {
 	ConfluenceScore  int     `json:"confluence_score" bson:"confluence_score"`       // 0-100 confluence points
 	BreakEvenWinRate float64 `json:"break_even_win_rate" bson:"break_even_win_rate"` // Required win rate to break even
 	RiskPercent      float64 `json:"risk_percent" bson:"risk_percent"`               // % distance to SL
-	RewardPercent    float64 `json:"reward_percent" bson:"reward_percent"`           // % distance to TP
+	RewardPercent    float64 `json:"reward_percent" bson:"reward_percent"`           // % distance to TP2
+	TP1Percent       float64 `json:"tp1_percent" bson:"tp1_percent"`                 // % distance to TP1
+	TP2Percent       float64 `json:"tp2_percent" bson:"tp2_percent"`                 // % distance to TP2
 	NearestLevelDist float64 `json:"nearest_level_dist" bson:"nearest_level_dist"`   // % distance to nearest key level
 
 	Status      string     `json:"status" bson:"status"`                       // ACTIVE, CLOSED
