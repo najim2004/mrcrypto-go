@@ -72,173 +72,81 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 		volRatio = signal.TechnicalContext.CurrentVol / signal.TechnicalContext.AvgVol
 	}
 
-	prompt := fmt.Sprintf(`তুমি একজন ১০+ বছরের অভিজ্ঞ ক্রিপ্টো ট্রেডিং বিশ্লেষক। নিচের সিগন্যালটি বিশ্লেষণ করে সঠিক সিদ্ধান্ত দাও।
+	prompt := fmt.Sprintf(`You are a Professional Crypto Trading Analyst and Hedge Fund Manager with 15+ years of experience. Your task is to perform a rigorous analysis of the following trading signal to ensure maximum accuracy.
+
+Remember: A wrong signal leads to significant financial loss. Only provide high scores if there is strong confluence.
 
 ╔══════════════════════════════════════════════════════════════╗
-                    🔔 সিগন্যাল ওভারভিউ
+                    🔔 SIGNAL DETAILS
 ╚══════════════════════════════════════════════════════════════╝
 
-📌 সিম্বল: %s
-📌 ডিরেকশন: %s
-📌 টায়ার: %s
-📌 মার্কেট রেজিম: %s
+📌 Pair: %s (Trading Symbol)
+📌 Direction: %s (Trade type: BUY/SELL)
+📌 Tier: %s (Signal quality classification)
+📌 Market Regime: %s (Current market condition: Trending/Ranging/Choppy)
+
+💰 RISK MANAGEMENT:
+🎯 Entry: %s (Current Market Price)
+🛑 Stop Loss: %s (Exit if price hits this level to limit loss, Risk: %.2f%%)
+🏆 Take Profit: %s (Target exit price for profit, Reward: %.2f%%)
+📊 R:R Ratio: %.2f (Reward-to-Risk ratio, higher is better)
+🎲 Break-Even Win Rate: %.2f%% (Required win rate to stay neutral at this R:R)
+💼 Position Size (Kelly): %.2f%% (Recommended allocation based on probability and edge)
+
+📊 TECHNICAL INDICATORS:
+• RSI (4H/1H/15M/5M): %.1f / %.1f / %.1f / %.1f (Relative Strength Index: >70 Overbought, <30 Oversold)
+• ADX (4H/1H/15M): %.1f / %.1f / %.1f (Average Directional Index: >25 Strong Trend, <20 Weak/Ranging)
+• MACD Histogram: %.6f (Moving Average Convergence Divergence: >0 Bullish Momentum, <0 Bearish Momentum)
+• Volume Ratio: %.2fx (Current volume vs Average volume: >1.5x indicates high participation)
+• Order Flow Delta: %.2f (Net buy/sell volume: Positive is Bullish, Negative is Bearish)
+• VWAP: %s (Volume Weighted Average Price: Price above/below indicates sentiment)
+
+🎯 KEY LEVELS (Support & Resistance):
+• Pivot Points: %s, %s, %s, PP: %s, %s, %s, %s (Standard daily support/resistance levels)
+• Nearest Pivot: %s (The level closest to the current price)
+• Fibonacci (38.2/50/61.8): %s, %s, %s (Major retracement levels)
+• Nearest Fib: %s (The Fibonacci level closest to the current price)
+• Distance from Level: %.2f%% (How close we are to a key structural level)
+
+🏛️ SMC (Smart Money Concepts) & MARKET STRUCTURE:
+• BTC Correlation: %s (Current trend of Bitcoin: UP/DOWN)
+• Order Block (OB): %s (Institutional interest zone: BULLISH/BEARISH/NONE)
+• Fair Value Gap (FVG): %s (Inefficiency zone: BULLISH/BEARISH/NONE)
+• Volume POC: %s (Point of Control: Price with highest volume in current range)
+• POC Distance: %.2f%% (How far price is from high volume node)
+
+📐 SYSTEM PROBABILITY:
+• Confluence Score: %d/100 (Internal system score based on matching indicators)
+• System Confidence: %.1f%% (Mathematical probability of success calculated from confluence)
 
 ╔══════════════════════════════════════════════════════════════╗
-              💰 রিস্ক ম্যানেজমেন্ট ডেটা
+                🔍 ANALYSIS GUIDELINES
 ╚══════════════════════════════════════════════════════════════╝
 
-🎯 এন্ট্রি প্রাইস: %s
-🛑 স্টপ লস: %s (রিস্ক: %.2f%%)
-🏆 টেক প্রফিট: %s (রিওয়ার্ড: %.2f%%)
+As an expert trader, you must deeply verify the following:
 
-📊 রিস্ক/রিওয়ার্ড রেশিও: %.2f
-   → ব্যাখ্যা: প্রতি $১ রিস্কে $%.2f রিওয়ার্ড
-   → গ্রহণযোগ্য: >= ২.০
-
-🎲 ব্রেক-ইভেন উইন রেট: %.2f%%
-   → ব্যাখ্যা: এই R:R তে প্রফিটেবল থাকতে ন্যূনতম যত %% ট্রেড জিততে হবে
-   → এটা যত কম, তত ভালো
-
-💼 প্রস্তাবিত পজিশন সাইজ: %.2f%% (Kelly Criterion অনুযায়ী)
+1. **Multi-Timeframe Alignment:** Are 4H and 1H trends aligned? Is RSI away from reversal zones?
+2. **Volume & Momentum:** Is Volume Ratio > 1.5x? Do MACD and Order Flow support the direction?
+3. **Key Level Rejection/Breakout:** Is price near a major Pivot or Fibonacci level? What is the likelihood of rejection/breakout?
+4. **Risk/Reward:** Is R:R > 2.0? Is SL at a logical structural level?
+5. **Market Regime:** Is this trade appropriate for the current regime (Trending/Ranging)?
+6. **SMC Confluence:** Is price reacting to an Order Block or filling a Gap? Is it aligned with BTC?
 
 ╔══════════════════════════════════════════════════════════════╗
-                📊 টেকনিক্যাল ইন্ডিকেটর
+                    📝 RESPONSE FORMAT
 ╚══════════════════════════════════════════════════════════════╝
 
-━━━ RSI (Relative Strength Index) ━━━
-• 4H RSI: %.1f
-• 1H RSI: %.1f  
-• 15M RSI: %.1f
-• 5M RSI: %.1f
+Respond ONLY in the following JSON format.
+CRITICAL: The "reason" field MUST be written in BENGALI (Bangla).
 
-📖 RSI ব্যাখ্যা:
-   - > 70 = ওভারবট (LONG এ সতর্ক)
-   - < 30 = ওভারসোল্ড (SHORT এ সতর্ক)
-   - 40-60 = নিউট্রাল জোন
-   - LONG এর জন্য আদর্শ: 45-65
-   - SHORT এর জন্য আদর্শ: 35-55
+{"score": <0-100>, "reason": "<detailed professional analysis in BENGALI>"}
 
-━━━ ADX (Average Directional Index) ━━━
-• 4H ADX: %.1f
-• 1H ADX: %.1f
-• 15M ADX: %.1f
-
-📖 ADX ব্যাখ্যা:
-   - < 20 = দুর্বল ট্রেন্ড (ট্রেড এড়িয়ে চলুন)
-   - 20-25 = মাঝারি ট্রেন্ড
-   - 25-30 = শক্তিশালী ট্রেন্ড ✅
-   - > 30 = অত্যন্ত শক্তিশালী ট্রেন্ড 🔥
-
-━━━ MACD (Moving Average Convergence Divergence) ━━━
-• হিস্টোগ্রাম: %.6f
-
-📖 MACD ব্যাখ্যা:
-   - হিস্টোগ্রাম > 0 = বুলিশ মোমেন্টাম (LONG ভালো)
-   - হিস্টোগ্রাম < 0 = বিয়ারিশ মোমেন্টাম (SHORT ভালো)
-
-━━━ ভলিউম বিশ্লেষণ ━━━
-• বর্তমান ভলিউম: %.2fx গড় ভলিউম
-
-📖 ভলিউম ব্যাখ্যা:
-   - < 1.0x = কম ভলিউম (দুর্বল সিগন্যাল)
-   - 1.0x-1.5x = স্বাভাবিক
-   - 1.5x-2.0x = ভালো কনফার্মেশন ✅
-   - > 2.0x = প্রতিষ্ঠানিক আগ্রহ 🔥
-
-━━━ অর্ডার ফ্লো ডেল্টা ━━━
-• ডেল্টা: %.2f
-
-📖 অর্ডার ফ্লো ব্যাখ্যা:
-   - > 0 = ক্রেতাদের চাপ বেশি (LONG সমর্থন করে)
-   - < 0 = বিক্রেতাদের চাপ বেশি (SHORT সমর্থন করে)
-
-━━━ VWAP (Volume Weighted Average Price) ━━━
-• VWAP: %s
-
-📖 VWAP ব্যাখ্যা:
-   - প্রাইস > VWAP = বুলিশ সেন্টিমেন্ট
-   - প্রাইস < VWAP = বিয়ারিশ সেন্টিমেন্ট
-
-╔══════════════════════════════════════════════════════════════╗
-                  🎯 কী লেভেল বিশ্লেষণ
-╚══════════════════════════════════════════════════════════════╝
-
-━━━ পিভট পয়েন্ট (Daily) ━━━
-• R3 (রেজিস্ট্যান্স ৩): %s
-• R2 (রেজিস্ট্যান্স ২): %s
-• R1 (রেজিস্ট্যান্স ১): %s
-• PP (পিভট পয়েন্ট): %s
-• S1 (সাপোর্ট ১): %s
-• S2 (সাপোর্ট ২): %s
-• S3 (সাপোর্ট ৩): %s
-• নিকটতম পিভট: %s
-
-📖 পিভট ব্যাখ্যা:
-   - LONG: সাপোর্ট (S1/S2) এর কাছে এন্ট্রি ভালো
-   - SHORT: রেজিস্ট্যান্স (R1/R2) এর কাছে এন্ট্রি ভালো
-
-━━━ ফিবোনাচ্চি রিট্রেসমেন্ট ━━━
-• 38.2%% লেভেল: %s
-• 50.0%% লেভেল: %s
-• 61.8%% লেভেল: %s (গোল্ডেন রেশিও)
-• নিকটতম ফিব: %s
-• নিকটতম লেভেল থেকে দূরত্ব: %.2f%%
-
-📖 ফিবোনাচ্চি ব্যাখ্যা:
-   - 61.8%% = সবচেয়ে শক্তিশালী রিভার্সাল জোন
-   - 50%% = সাইকোলজিক্যাল লেভেল
-   - কী লেভেল থেকে ২%% এর মধ্যে এন্ট্রি = ভালো
-
-╔══════════════════════════════════════════════════════════════╗
-                📐 প্রোবাবিলিটি মেট্রিক্স
-╚══════════════════════════════════════════════════════════════╝
-
-🎯 কনফ্লুয়েন্স স্কোর: %d/100
-   → ব্যাখ্যা: কতগুলো ফ্যাক্টর একমত আছে
-   → 60+ = গ্রহণযোগ্য
-   → 80+ = এক্সিলেন্ট
-
-📊 সিগন্যাল কনফিডেন্স: %.1f%%
-   → ব্যাখ্যা: কনফ্লুয়েন্স স্কোর থেকে গণনা করা সম্ভাব্যতা
-
-╔══════════════════════════════════════════════════════════════╗
-                ✅ তোমার মূল্যায়ন করতে হবে
-╚══════════════════════════════════════════════════════════════╝
-
-নিচের প্রশ্নগুলোর উত্তর দিয়ে সিদ্ধান্ত নাও:
-
-1️⃣ RSI কি ডিরেকশনের সাথে মিলছে?
-   - LONG = RSI 40-65 হওয়া উচিত
-   - SHORT = RSI 35-55 হওয়া উচিত
-
-2️⃣ ট্রেন্ড কি যথেষ্ট শক্তিশালী?
-   - ADX >= 20 হওয়া উচিত
-   - আদর্শ: ADX >= 25
-
-3️⃣ এন্ট্রি কি ভালো জায়গায়?
-   - কী লেভেল (সাপোর্ট/রেজিস্ট্যান্স) থেকে ২%% এর মধ্যে?
-
-4️⃣ R:R কি যুক্তিসঙ্গত?
-   - R:R >= 2.0 হওয়া উচিত
-
-5️⃣ ভলিউম কি কনফার্ম করছে?
-   - >= 1.5x গড় ভলিউম থাকলে ভালো
-
-╔══════════════════════════════════════════════════════════════╗
-                    📝 তোমার রেসপন্স
-╚══════════════════════════════════════════════════════════════╝
-
-⚠️ গুরুত্বপূর্ণ: রেসপন্স বাংলায় দাও।
-
-শুধু JSON ফরম্যাটে উত্তর দাও:
-{"score": <0-100>, "reason": "<বিস্তারিত বাংলায় বিশ্লেষণ>"}
-
-স্কোরিং গাইড:
-• 80-100 = এক্সিলেন্ট সিগন্যাল (সব ফ্যাক্টর মিলছে)
-• 70-79 = ভালো সিগন্যাল (বেশিরভাগ ফ্যাক্টর মিলছে)
-• 60-69 = গ্রহণযোগ্য (কিছু ঝুঁকি আছে)
-• 40-59 = দুর্বল (অনেক ফ্যাক্টর মিলছে না)
-• 0-39 = এড়িয়ে চলুন`,
+Scoring Rules (Be extremely critical):
+• 95-100: Unique setup (All indicators and HTF aligned)
+• 85-94: High probability (Minor gaps allowed)
+• 75-84: Good setup (Some risk factors present)
+• 60-74: Average (Trade with caution)
+• Below 60: Direct Reject (Avoid)`,
 		signal.Symbol,
 		signal.Type,
 		signal.Tier,
@@ -248,7 +156,6 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 		signal.RiskPercent,
 		FormatPrice(signal.TakeProfit),
 		signal.RewardPercent,
-		signal.RiskRewardRatio,
 		signal.RiskRewardRatio,
 		signal.BreakEvenWinRate,
 		signal.RecommendedSize,
@@ -276,6 +183,11 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
 		FormatPrice(signal.TechnicalContext.Fib618),
 		signal.TechnicalContext.NearestFib,
 		signal.NearestLevelDist,
+		signal.TechnicalContext.BTCCorrelation,
+		signal.TechnicalContext.OBType,
+		signal.TechnicalContext.FVGType,
+		FormatPrice(signal.TechnicalContext.POC),
+		signal.TechnicalContext.POCDistance,
 		signal.ConfluenceScore,
 		signal.ConfidenceScore*100,
 	)
@@ -351,25 +263,26 @@ func (s *AIService) BatchValidateSignals(signals []*model.Signal) ([]AIValidatio
 	}
 
 	// Build batch prompt with comprehensive data
-	prompt := `You are a professional crypto trading analyst. Analyze these trading signals using ALL provided data.
+	prompt := `You are a Tier-1 Crypto Trading Floor Manager with 15+ years of experience. Analyze these potential signals with extreme scrutiny. 
+Discard any setups that lack proper technical alignment or have poor risk management.
 
-CRITICAL EVALUATION CRITERIA:
-1. Confluence Score >= 60 is acceptable, >= 80 is excellent
-2. Risk/Reward >= 2.0 is required
-3. Entry should be near a key level (pivot or fibonacci)
-4. Volume should confirm the move (>= 1.5x average)
-5. Consider probability metrics for confidence
+STRICT CRITERIA:
+1. Multi-TF Alignment: 4H and 1H trends MUST align for high scores.
+2. Volume Confirmation: Real breakouts need >= 1.5x average volume.
+3. Key Level Integrity: Respect major Pivot and Fibonacci levels.
+4. Risk Management: If R:R < 2.0, the signal is INVALID.
 
-IMPORTANT: Provide reason in Bengali (Bangla) language.
+BENGALI ONLY REASONING:
+Explain your decision like a senior mentor teaching a junior trader. You MUST write the "reason" in BENGALI (Bangla).
 
-Respond with a JSON array:
+RESPONSE FORMAT:
+Respond only with a JSON array:
 [
-  {"signal": 1, "score": <0-100>, "reason": "<analysis in Bangla>"},
-  {"signal": 2, "score": <0-100>, "reason": "<analysis in Bangla>"},
-  ...
+  {"signal": 1, "score": <0-100>, "reason": "<Senior Analyst explanation in Bengali>"},
+  {"signal": 2, "score": <0-100>, "reason": "<Senior Analyst explanation in Bengali>"}
 ]
 
-SIGNALS TO ANALYZE:
+SIGNALS TO SCRUTINIZE:
 `
 
 	for idx, signal := range signals {
@@ -381,27 +294,33 @@ SIGNALS TO ANALYZE:
 
 		prompt += fmt.Sprintf(`
 ━━━━━━━━━━ SIGNAL %d ━━━━━━━━━━
-Symbol: %s | Direction: %s | Tier: %s | Regime: %s
+📌 Symbol: %s | Direction: %s | Tier: %s | Regime: %s (Market Cycle)
 
-📈 RISK MANAGEMENT:
-Entry: %s | SL: %s (%.2f%%) | TP: %s (%.2f%%)
-R:R: %.2f | Break-even Win Rate: %.2f%% | Position: %.2f%%
+💰 RISK & REWARD (Position Management):
+- Entry Price: %s (Current Market Level)
+- Stop Loss: %s (Exit if hit, Risk: %.2f%%)
+- Take Profit: %s (Target exit, Reward: %.2f%%)
+- R:R Ratio: %.2f (Reward-to-Risk)
+- Break-Even Win Rate: %.2f%% (Statistically required)
+- Rec. Position Size: %.2f%% (Kelly Criterion allocation)
 
-📊 INDICATORS:
-RSI (4H/1H/15M/5M): %.1f / %.1f / %.1f / %.1f
-ADX (4H/1H/15M): %.1f / %.1f / %.1f
-MACD Hist: %.6f | Volume: %.2fx | Order Flow: %.2f
+📊 TECHNICAL INDICATORS (Momentum & Trend):
+- RSI (4H/1H/15M/5M): %.1f/%.1f/%.1f/%.1f (Strength: >70 Overbought, <30 Oversold)
+- ADX (4H/1H/15M): %.1f/%.1f/%.1f (Trend Intensity: >25 Strong)
+- MACD Histogram: %.6f (Momentum Direction)
+- Volume Ratio: %.2fx (Relative volume vs Average)
+- Order Flow: %.2f (Net buying/selling pressure)
 
-🎯 KEY LEVELS:
-Pivot: %s | S1: %s | R1: %s
-Nearest: %s (%.2f%% away)
-Fib 50%%: %s | Fib 61.8%%: %s
+🎯 LEVELS & MARKET STRUCTURE (SMC):
+- Pivot Levels: Pivot: %s | S1: %s | R1: %s (Support/Resistance)
+- Nearest Pivot: %s (Price distance: %.2f%%)
+- Fibonacci: 50.0%%: %s | 61.8%%: %s | Nearest: %s (Retracement zones)
+- BTC Trend: %s (Overall market correlation)
+- Smart Money: OB: %s (Order Block) | FVG: %s (Fair Value Gap)
+- Volume Profile: POC: %s (Dist: %.2f%%) (Point of Control)
+- System Confluence: %d/100 | Confidence: %.1f%% (Internal probability)
 
-📐 PROBABILITY & CONFLUENCE:
-Confluence: %d/100 | Confidence: %.1f%%
-BTC: %s | SMC OB: %s | FVG: %s | POC: %s (%.2f%%)
-
-EXPLAIN DECISION (Professional Bangla):
+SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
 `,
 			idx+1,
 			signal.Symbol,
@@ -433,13 +352,14 @@ EXPLAIN DECISION (Professional Bangla):
 			signal.NearestLevelDist,
 			FormatPrice(signal.TechnicalContext.Fib500),
 			FormatPrice(signal.TechnicalContext.Fib618),
-			signal.ConfluenceScore,
-			signal.ConfidenceScore*100,
+			signal.TechnicalContext.NearestFib,
 			signal.TechnicalContext.BTCCorrelation,
 			signal.TechnicalContext.OBType,
 			signal.TechnicalContext.FVGType,
 			FormatPrice(signal.TechnicalContext.POC),
 			signal.TechnicalContext.POCDistance,
+			signal.ConfluenceScore,
+			signal.ConfidenceScore*100,
 		)
 	}
 

@@ -181,7 +181,8 @@ func (s *TelegramService) handleToday(chatID int64) {
 	for idx, sig := range signals {
 		message += fmt.Sprintf("%d. %s %s\n", idx+1, sig.Type, sig.Symbol)
 		message += fmt.Sprintf("   Entry: %s\n", FormatPrice(sig.EntryPrice))
-		message += fmt.Sprintf("   Score: %d/100\n", sig.AIScore)
+		message += fmt.Sprintf("   AI Score: %d/100\n", sig.AIScore)
+		message += fmt.Sprintf("   Confidence: %.0f%%\n", sig.ConfidenceScore*100)
 		message += fmt.Sprintf("   Tier: %s\n\n", sig.Tier)
 	}
 
@@ -653,9 +654,10 @@ func formatSignalMessage(signal *model.Signal) string {
 🎯 <b>TP 1:</b> <code>%s</code> (%.2f%%)
 🏆 <b>TP 2:</b> <code>%s</code> (%.2f%%)
 
-📊 <b>CONFIDENCE:</b> %.0f%% (%s)
+🤖 <b>AI Validation:</b> %d/100
+📊 <b>System Confidence:</b> %.0f%% (%s)
 
-🤖 <b>ANALYSIS:</b>
+📝 <b>Analysis:</b>
 %s
 
 #%s #%s #MrCrypto
@@ -672,6 +674,7 @@ func formatSignalMessage(signal *model.Signal) string {
 		signal.TP1Percent,
 		FormatPrice(signal.TakeProfit2),
 		signal.TP2Percent,
+		signal.AIScore,
 		signal.ConfidenceScore*100,
 		confidenceLevel,
 		aiReason,
