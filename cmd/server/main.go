@@ -8,6 +8,7 @@ import (
 
 	"mrcrypto-go/internal/config"
 	"mrcrypto-go/internal/loader"
+	"mrcrypto-go/internal/monitor"
 	"mrcrypto-go/internal/service"
 )
 
@@ -33,6 +34,13 @@ func main() {
 	}
 	defer databaseService.Close()
 
+	// Initialize Signal Monitor for active trade monitoring
+	signalMonitor := monitor.NewSignalMonitor(
+		databaseService.GetDB(),
+		binanceService,
+		telegramService,
+	)
+
 	log.Println("✅ All services initialized successfully")
 
 	// Create and start loader
@@ -42,6 +50,7 @@ func main() {
 		aiService,
 		telegramService,
 		databaseService,
+		signalMonitor,
 	)
 
 	// Handle graceful shutdown

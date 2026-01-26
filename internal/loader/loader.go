@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"mrcrypto-go/internal/model"
+	"mrcrypto-go/internal/monitor"
 	"mrcrypto-go/internal/service"
 	"mrcrypto-go/internal/worker"
 
@@ -12,12 +13,13 @@ import (
 )
 
 type Loader struct {
-	binance   *service.BinanceService
-	strategy  *service.StrategyService
-	ai        *service.AIService
-	telegram  *service.TelegramService
-	database  *service.DatabaseService
-	isPolling bool
+	binance       *service.BinanceService
+	strategy      *service.StrategyService
+	ai            *service.AIService
+	telegram      *service.TelegramService
+	database      *service.DatabaseService
+	signalMonitor *monitor.SignalMonitor
+	isPolling     bool
 }
 
 // NewLoader creates a new loader instance
@@ -27,14 +29,16 @@ func NewLoader(
 	ai *service.AIService,
 	telegram *service.TelegramService,
 	database *service.DatabaseService,
+	signalMonitor *monitor.SignalMonitor,
 ) *Loader {
 	return &Loader{
-		binance:   binance,
-		strategy:  strategy,
-		ai:        ai,
-		telegram:  telegram,
-		database:  database,
-		isPolling: false,
+		binance:       binance,
+		strategy:      strategy,
+		ai:            ai,
+		telegram:      telegram,
+		database:      database,
+		signalMonitor: signalMonitor,
+		isPolling:     false,
 	}
 }
 
@@ -44,7 +48,7 @@ func (l *Loader) Start() {
 
 	c := cron.New()
 
-	// Run every 1 minute
+	// Run signal generation every 1 minute
 	c.AddFunc("@every 1m", func() {
 		if l.isPolling {
 			log.Println("⏭️  Skipping cycle - previous poll still running")
@@ -54,9 +58,16 @@ func (l *Loader) Start() {
 		l.poll()
 	})
 
+	// Run active signal monitoring every 30 seconds
+	c.AddFunc("@every 30s", func() {
+		if l.signalMonitor != nil {
+			l.signalMonitor.MonitorActiveSignals()
+		}
+	})
+
 	c.Start()
 
-	log.Println("⏰ Scheduler started - polling every 1 minute")
+	log.Println("⏰ Scheduler started - polling every 1 minute, monitoring every 30 seconds")
 
 	// Keep the program running
 	select {}

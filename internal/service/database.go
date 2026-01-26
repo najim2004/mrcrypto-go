@@ -115,3 +115,8 @@ func (s *DatabaseService) Close() error {
 	log.Println("🔌 MongoDB connection closed")
 	return nil
 }
+
+// GetDB returns the MongoDB database instance
+func (s *DatabaseService) GetDB() *mongo.Database {
+	return s.client.Database("mrcrypto")
+}
