@@ -57,13 +57,14 @@ func NewAIService() *AIService {
 // AIValidationResult contains the AI's assessment
 type AIValidationResult struct {
 	Score  int    `json:"score"`
+	Tier   string `json:"tier"` // Standard or Premium
 	Reason string `json:"reason"`
 }
 
 // ValidateSignal sends the signal to Gemini AI for validation with fallback models
-func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, error) {
+func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, string, error) {
 	if len(s.clients) == 0 {
-		return 0, "", fmt.Errorf("no gemini clients initialized")
+		return 0, "", "", fmt.Errorf("no gemini clients initialized")
 	}
 
 	// Calculate volume ratio safely
@@ -82,55 +83,48 @@ Remember: A wrong signal leads to significant financial loss. Only provide high 
 
 📌 Pair: %s (Trading Symbol)
 📌 Direction: %s (Trade type: BUY/SELL)
-📌 Tier: %s (Signal quality classification)
-📌 Market Regime: %s (Current market condition: Trending/Ranging/Choppy)
+📌 System Tier: %s (Based on technicals)
+📌 Market Regime: %s (Current market condition)
 
 💰 RISK MANAGEMENT:
-🎯 Entry: %s (Current Market Price)
-🛑 Stop Loss: %s (Exit if price hits this level to limit loss, Risk: %.2f%%)
-🏆 Take Profit: %s (Target exit price for profit, Reward: %.2f%%)
-📊 R:R Ratio: %.2f (Reward-to-Risk ratio, higher is better)
-🎲 Break-Even Win Rate: %.2f%% (Required win rate to stay neutral at this R:R)
-💼 Position Size (Kelly): %.2f%% (Recommended allocation based on probability and edge)
+🎯 Entry: %s
+🛑 Stop Loss: %s (Risk: %.2f%%)
+🏆 Take Profit: %s (Reward: %.2f%%)
+📊 R:R Ratio: %.2f
 
 📊 TECHNICAL INDICATORS:
-• RSI (4H/1H/15M/5M): %.1f / %.1f / %.1f / %.1f (Relative Strength Index: >70 Overbought, <30 Oversold)
-• ADX (4H/1H/15M): %.1f / %.1f / %.1f (Average Directional Index: >25 Strong Trend, <20 Weak/Ranging)
-• MACD Histogram: %.6f (Moving Average Convergence Divergence: >0 Bullish Momentum, <0 Bearish Momentum)
-• Volume Ratio: %.2fx (Current volume vs Average volume: >1.5x indicates high participation)
-• Order Flow Delta: %.2f (Net buy/sell volume: Positive is Bullish, Negative is Bearish)
-• VWAP: %s (Volume Weighted Average Price: Price above/below indicates sentiment)
+• RSI (4H/1H/15M): %.1f / %.1f / %.1f
+• ADX (4H/1H): %.1f / %.1f
+• MACD Histogram: %.6f
+• Volume Ratio: %.2fx
+• Order Flow Delta: %.2f
+• VWAP: %s
 
-🎯 KEY LEVELS (Support & Resistance):
-• Pivot Points: %s, %s, %s, PP: %s, %s, %s, %s (Standard daily support/resistance levels)
-• Nearest Pivot: %s (The level closest to the current price)
-• Fibonacci (38.2/50/61.8): %s, %s, %s (Major retracement levels)
-• Nearest Fib: %s (The Fibonacci level closest to the current price)
-• Distance from Level: %.2f%% (How close we are to a key structural level)
+🎯 KEY LEVELS:
+• Pivot Points: %s (S1: %s, R1: %s)
+• Nearest Pivot: %s
+• Nearest Fib: %s (Dist: %.2f%%)
 
-🏛️ SMC (Smart Money Concepts) & MARKET STRUCTURE:
-• BTC Correlation: %s (Current trend of Bitcoin: UP/DOWN)
-• Order Block (OB): %s (Institutional interest zone: BULLISH/BEARISH/NONE)
-• Fair Value Gap (FVG): %s (Inefficiency zone: BULLISH/BEARISH/NONE)
-• Volume POC: %s (Point of Control: Price with highest volume in current range)
-• POC Distance: %.2f%% (How far price is from high volume node)
-
-📐 SYSTEM PROBABILITY:
-• Confluence Score: %d/100 (Internal system score based on matching indicators)
-• System Confidence: %.1f%% (Mathematical probability of success calculated from confluence)
+🏛️ SMC & CONFLUENCE:
+• BTC Correlation: %s
+• Order Block (OB): %s
+• Fair Value Gap (FVG): %s
+• Volume POC: %s (Dist: %.2f%%)
+• System Confluence: %d/100
+• System Confidence: %.1f%%
 
 ╔══════════════════════════════════════════════════════════════╗
                 🔍 ANALYSIS GUIDELINES
 ╚══════════════════════════════════════════════════════════════╝
 
-As an expert trader, you must deeply verify the following:
-
-1. **Multi-Timeframe Alignment:** Are 4H and 1H trends aligned? Is RSI away from reversal zones?
-2. **Volume & Momentum:** Is Volume Ratio > 1.5x? Do MACD and Order Flow support the direction?
-3. **Key Level Rejection/Breakout:** Is price near a major Pivot or Fibonacci level? What is the likelihood of rejection/breakout?
-4. **Risk/Reward:** Is R:R > 2.0? Is SL at a logical structural level?
-5. **Market Regime:** Is this trade appropriate for the current regime (Trending/Ranging)?
-6. **SMC Confluence:** Is price reacting to an Order Block or filling a Gap? Is it aligned with BTC?
+1. **Multi-Timeframe Alignment:** Are 4H and 1H trends aligned?
+2. **Volume & Momentum:** Is Volume > Avg? Does MACD support direction?
+3. **Key Level:** Is price reacting to a major level?
+4. **Risk/Reward:** Is R:R > 2.0?
+5. **Score & Tier:**
+   - **PREMIUM (90-100):** Perfect setup. Trend aligned, Volume confirmed, Key Level test.
+   - **STANDARD (70-89):** Good setup but maybe 1 factor weak (e.g., weak volume).
+   - **REJECT (<70):** Bad risk/reward, choppy market, or contra-trend.
 
 ╔══════════════════════════════════════════════════════════════╗
                     📝 RESPONSE FORMAT
@@ -139,14 +133,8 @@ As an expert trader, you must deeply verify the following:
 Respond ONLY in the following JSON format.
 CRITICAL: The "reason" field MUST be written in BENGALI (Bangla).
 
-{"score": <0-100>, "reason": "<detailed professional analysis in BENGALI>"}
-
-Scoring Rules (Be extremely critical):
-• 95-100: Unique setup (All indicators and HTF aligned)
-• 85-94: High probability (Minor gaps allowed)
-• 75-84: Good setup (Some risk factors present)
-• 60-74: Average (Trade with caution)
-• Below 60: Direct Reject (Avoid)`,
+{"score": <0-100>, "tier": "PREMIUM"|"STANDARD"|"REJECT", "reason": "<detailed analysis in BENGALI>"}
+`,
 		signal.Symbol,
 		signal.Type,
 		signal.Tier,
@@ -157,30 +145,19 @@ Scoring Rules (Be extremely critical):
 		FormatPrice(signal.TakeProfit),
 		signal.RewardPercent,
 		signal.RiskRewardRatio,
-		signal.BreakEvenWinRate,
-		signal.RecommendedSize,
 		signal.TechnicalContext.RSI4h,
 		signal.TechnicalContext.RSI1h,
 		signal.TechnicalContext.RSI15m,
-		signal.TechnicalContext.RSI5m,
 		signal.TechnicalContext.ADX4h,
 		signal.TechnicalContext.ADX1h,
-		signal.TechnicalContext.ADX15m,
 		signal.TechnicalContext.Histogram,
 		volRatio,
 		signal.TechnicalContext.OrderFlowDelta,
 		FormatPrice(signal.TechnicalContext.VWAP),
-		FormatPrice(signal.TechnicalContext.PivotR3),
-		FormatPrice(signal.TechnicalContext.PivotR2),
-		FormatPrice(signal.TechnicalContext.PivotR1),
 		FormatPrice(signal.TechnicalContext.PivotPoint),
 		FormatPrice(signal.TechnicalContext.PivotS1),
-		FormatPrice(signal.TechnicalContext.PivotS2),
-		FormatPrice(signal.TechnicalContext.PivotS3),
+		FormatPrice(signal.TechnicalContext.PivotR1),
 		signal.TechnicalContext.NearestPivot,
-		FormatPrice(signal.TechnicalContext.Fib382),
-		FormatPrice(signal.TechnicalContext.Fib500),
-		FormatPrice(signal.TechnicalContext.Fib618),
 		signal.TechnicalContext.NearestFib,
 		signal.NearestLevelDist,
 		signal.TechnicalContext.BTCCorrelation,
@@ -194,10 +171,9 @@ Scoring Rules (Be extremely critical):
 
 	// List of models to try in order (fallback)
 	models := []string{
-		"gemini-3-flash",
-		"gemini-2.5-flash",
-		"gemini-2.5-flash-lite",
-		"gemini-2.5-flash-tts",
+		"gemini-2.0-flash",
+		"gemini-1.5-flash",
+		"gemini-1.5-pro",
 	}
 
 	var lastError error
@@ -216,40 +192,31 @@ Scoring Rules (Be extremely critical):
 			if err != nil {
 				lastError = err
 				log.Printf("⚠️  %s - Model %s (Client %d) failed: %v", signal.Symbol, modelName, cIdx+1, err)
-
-				// If quota exceeded or key expired, try next client immediately
-				errStr := err.Error()
-				if strings.Contains(errStr, "429") ||
-					strings.Contains(errStr, "quota") ||
-					strings.Contains(errStr, "expired") ||
-					strings.Contains(errStr, "API_KEY_INVALID") ||
-					strings.Contains(errStr, "INVALID_ARGUMENT") {
-					log.Printf("🔄 Switching to next client due to error: %v", err)
-					continue
-				}
-
-				// If other error, maybe try next model
-				break // Break inner client loop to try next model
+				continue
 			}
 
 			// Success! Parse response
 			responseText := result.Text()
+			jsonText := extractJSONFromMarkdown(responseText)
 
 			var aiResult AIValidationResult
-			if err := json.Unmarshal([]byte(responseText), &aiResult); err != nil {
-				log.Printf("⚠️  Failed to parse AI response for %s (model: %s): %v", signal.Symbol, modelName, err)
-				// Don't error out on parse error, maybe try next model?
-				// For now, return default
-				return 50, responseText, nil
+			if err := json.Unmarshal([]byte(jsonText), &aiResult); err != nil {
+				log.Printf("⚠️  Failed to parse AI response for %s: %v", signal.Symbol, err)
+				return 50, "STANDARD", "AI Parse Error", nil
 			}
 
-			log.Printf("✅ [AI] %s - Validated! Model: %s, Client: %d, Score: %d/100", signal.Symbol, modelName, cIdx+1, aiResult.Score)
-			return aiResult.Score, aiResult.Reason, nil
+			// Normalize Tier
+			tier := strings.ToUpper(aiResult.Tier)
+			if tier != "PREMIUM" && tier != "STANDARD" {
+				tier = "REJECT" // Default to reject if unknown
+			}
+
+			log.Printf("✅ [AI] %s - Validated! Score: %d, Tier: %s", signal.Symbol, aiResult.Score, tier)
+			return aiResult.Score, tier, aiResult.Reason, nil
 		}
 	}
 
-	// Should never reach here, but just in case
-	return 0, "", fmt.Errorf("unexpected error: %w", lastError)
+	return 0, "", "", fmt.Errorf("all AI models failed: %w", lastError)
 }
 
 // BatchValidateSignals validates multiple signals in a single AI call (OPTIMIZED)
@@ -416,6 +383,7 @@ SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
 			var results []struct {
 				SignalNum int    `json:"signal"`
 				Score     int    `json:"score"`
+				Tier      string `json:"tier"`
 				Reason    string `json:"reason"`
 			}
 
@@ -425,7 +393,7 @@ SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
 				// Return default scores
 				defaultResults := make([]AIValidationResult, len(signals))
 				for idx := range defaultResults {
-					defaultResults[idx] = AIValidationResult{Score: 50, Reason: "AI parse error"}
+					defaultResults[idx] = AIValidationResult{Score: 50, Tier: "STANDARD", Reason: "AI parse error"}
 				}
 				return defaultResults, nil
 			}
@@ -434,8 +402,13 @@ SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
 			validationResults := make([]AIValidationResult, len(signals))
 			for idx, res := range results {
 				if idx < len(validationResults) {
+					tier := strings.ToUpper(res.Tier)
+					if tier != "PREMIUM" && tier != "STANDARD" {
+						tier = "REJECT"
+					}
 					validationResults[idx] = AIValidationResult{
 						Score:  res.Score,
+						Tier:   tier,
 						Reason: res.Reason,
 					}
 				}

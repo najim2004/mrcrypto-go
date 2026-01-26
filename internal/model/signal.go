@@ -91,6 +91,7 @@ type Signal struct {
 	Regime           string           `json:"regime" bson:"regime"`
 	TechnicalContext TechnicalContext `json:"technical_context" bson:"technical_context"`
 	AIScore          int              `json:"ai_score" bson:"ai_score"`
+	AITier           string           `json:"ai_tier" bson:"ai_tier"` // Standard, Premium, or Reject
 	AIReason         string           `json:"ai_reason" bson:"ai_reason"`
 
 	// Probability Fields

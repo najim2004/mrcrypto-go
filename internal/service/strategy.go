@@ -210,39 +210,30 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// ========================================
 	// STEP 5: CONFLUENCE SCORING (0-100)
 	// ========================================
+	// ========================================
+	// STEP 5: CONFLUENCE SCORING (Strict 0-100)
+	// ========================================
 	signalDir := determineSignalDirection(regime, currentPrice, ema50Value, rsi4h)
 	if signalDir == "" {
 		log.Printf("⏭️  [Strategy] %s - No clear direction", symbol)
 		return nil, nil
 	}
 
-	// BTC Correlation Filter
-	startScore := 0
-	if btcTrend != "" {
-		if (signalDir == "LONG" && btcTrend == "DOWN") || (signalDir == "SHORT" && btcTrend == "UP") {
-			log.Printf("⚠️  [Strategy] %s - Contra Bitcoin trend (%s vs BTC %s). Penalty applied.", symbol, signalDir, btcTrend)
-			startScore = -20 // Heavy penalty for trading against BTC
-		} else {
-			startScore = 15 // Bonus for aligning with BTC
-		}
-	} else if symbol == "BTCUSDT" {
-		startScore = 15 // BTC is always correlated with itself
-	}
-
+	// Calculate Score (Max 100)
 	score := calculateConfluenceScore(
 		signalDir, regime,
-		rsi4h, rsi1h, rsi15m, rsi5m,
-		adx4h, adx1h, adx15m,
+		rsi4h, rsi1h,
+		adx4h, adx1h,
 		histogram, volRatio, orderFlowDelta,
 		currentPrice, pivotPoints, fibLevels,
-		startScore, inFVG, fvgType, inOB, obType, pocDist,
+		btcTrend, inFVG, fvgType, inOB, obType, pocDist,
 	)
 
 	log.Printf("📊 [Strategy] %s - Confluence Score: %d/100 (Dir: %s)", symbol, score, signalDir)
 
-	// Minimum score threshold
-	if score < 60 {
-		log.Printf("⏭️  [Strategy] %s - Score too low (%d < 60)", symbol, score)
+	// Minimum score threshold (Strict 70)
+	if score < 70 {
+		log.Printf("⏭️  [Strategy] %s - Score too low (%d < 70)", symbol, score)
 		return nil, nil
 	}
 
@@ -253,8 +244,9 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	fibProximity := math.Abs(currentPrice-nearestFibPrice) / currentPrice * 100
 
 	// Must be within 2% of a key level for entry
+	// EXCEPTION: If score is Premium (>= 90), we allow slightly wider entry
 	nearKeyLevel := pivotProximity <= 2.0 || fibProximity <= 2.0
-	if !nearKeyLevel && score < 80 {
+	if !nearKeyLevel && score < 90 {
 		log.Printf("⏭️  [Strategy] %s - Not near key level (Pivot: %.2f%%, Fib: %.2f%%)",
 			symbol, pivotProximity, fibProximity)
 		return nil, nil
@@ -264,7 +256,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// STEP 7: DETERMINE TIER
 	// ========================================
 	tier := model.TierStandard
-	if score >= 80 && adx4h >= 30 && volRatio >= 2.0 {
+	if score >= 90 {
 		tier = model.TierPremium
 	}
 
@@ -371,7 +363,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	techContext := model.TechnicalContext{
 		RSI4h:          rsi4h,
 		RSI1h:          rsi1h,
-		RSI15m:         rsi15m,
+		RSI15m:         rsi15m, // Still logging these but score uses less
 		RSI5m:          rsi5m,
 		ADX4h:          adx4h,
 		ADX1h:          adx1h,
@@ -433,16 +425,12 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		Timestamp: time.Now(),
 	}
 
-	log.Printf("✨ [Strategy] %s - %s signal! Score: %d (%.0f%% prob), Tier: %s, R:R: %.2f, Entry: %s, SL: %s (%.2f%%), TP1: %s, TP2: %s",
+	log.Printf("✨ [Strategy] %s - %s signal! Score: %d (%.0f%% prob), Tier: %s, R:R: %.2f, Entry: %s, SL: %s (%.2f%%)",
 		symbol, signalDir, score, signalProbability*100, tier, rrResult.Ratio,
-		FormatPrice(currentPrice), FormatPrice(stopLoss), riskPercent, FormatPrice(takeProfit1), FormatPrice(takeProfit2))
+		FormatPrice(currentPrice), FormatPrice(stopLoss), riskPercent)
 
 	return signal, nil
 }
-
-// ========================================
-// PROFESSIONAL HELPER FUNCTIONS
-// ========================================
 
 // detectRegimePro uses multi-timeframe ADX for better regime detection
 func detectRegimePro(adx4h, adx1h, price, ema50 float64) model.MarketRegime {
@@ -474,93 +462,124 @@ func determineSignalDirection(regime model.MarketRegime, price, ema50, rsi4h flo
 	return ""
 }
 
-// calculateConfluenceScore calculates weighted confluence score (0-100)
+// calculateConfluenceScore calculates strict weighted score (Max 100)
+//
+// WEIGTHS DISTRIBUTION (TOTAL: 100):
+// 1. Trend Alignment: 		20
+// 2. RSI Momentum: 		15
+// 3. Key Level: 			15
+// 4. Volume: 				10
+// 5. Order Flow: 			5
+// 6. MACD:					5
+// 7. SMC (OB/FVG): 		15
+// 8. Volume Profile (POC): 5
+// 9. BTC Correlation: 		10
 func calculateConfluenceScore(
 	direction string, regime model.MarketRegime,
-	rsi4h, rsi1h, rsi15m, rsi5m float64,
-	adx4h, adx1h, adx15m float64,
+	rsi4h, rsi1h float64,
+	adx4h, adx1h float64,
 	histogram, volRatio, orderFlow float64,
 	price float64, pivots internalmath.PivotPoints, fibs internalmath.FibonacciLevels,
-	startScore int, inFVG bool, fvgType string, inOB bool, obType string, pocDist float64,
+	btcTrend string, inFVG bool, fvgType string, inOB bool, obType string, pocDist float64,
 ) int {
-	score := startScore
+	score := 0
 
-	// 1. Trend Alignment (4H + 1H same direction) - 25 points
-	if regime == model.RegimeTrendingUp || regime == model.RegimeTrendingDown {
-		if adx4h > 20 && adx1h > 20 {
-			score += 25
-		} else if adx4h > 20 || adx1h > 20 {
-			score += 15
-		}
+	// 1. Trend Alignment (Max 20)
+	// Strong trend in both 4H and 1H
+	if adx4h > 20 && adx1h > 20 {
+		score += 20
+	} else if adx4h > 20 || adx1h > 20 {
+		score += 10
 	}
 
-	// 2. RSI Momentum (not overbought/oversold) - 20 points
+	// 2. RSI Momentum (Max 15)
 	if direction == "LONG" {
 		if rsi4h > 40 && rsi4h < 65 && rsi1h > 45 && rsi1h < 70 {
-			score += 20
-		} else if rsi4h > 35 && rsi4h < 70 {
-			score += 10
+			score += 15 // Perfect zone
+		} else if rsi4h > 35 && rsi4h < 75 {
+			score += 5 // Acceptable
 		}
 	} else {
 		if rsi4h > 35 && rsi4h < 60 && rsi1h > 30 && rsi1h < 55 {
-			score += 20
-		} else if rsi4h > 30 && rsi4h < 65 {
-			score += 10
+			score += 15
+		} else if rsi4h > 25 && rsi4h < 65 {
+			score += 5
 		}
 	}
 
-	// 3. Key Level Proximity - 20 points
+	// 3. Key Level Proximity (Max 15)
 	pivotDist := getPivotDistance(price, pivots)
 	fibDist := getFibDistance(price, fibs)
 
 	if pivotDist <= 1.0 || fibDist <= 1.0 {
-		score += 20
+		score += 15
 	} else if pivotDist <= 2.0 || fibDist <= 2.0 {
-		score += 12
-	} else if pivotDist <= 3.0 || fibDist <= 3.0 {
-		score += 5
+		score += 8
 	}
 
-	// 4. Volume Confirmation - 15 points
-	if volRatio >= 2.0 {
-		score += 15
-	} else if volRatio >= 1.5 {
+	// 4. Volume (Max 10)
+	if volRatio >= 1.5 {
 		score += 10
 	} else if volRatio >= 1.2 {
 		score += 5
 	}
 
-	// 5. MACD Alignment - 10 points
-	if direction == "LONG" && histogram > 0 {
-		score += 10
-	} else if direction == "SHORT" && histogram < 0 {
-		score += 10
+	// 5. Order Flow (Max 5)
+	if (direction == "LONG" && orderFlow > 0) || (direction == "SHORT" && orderFlow < 0) {
+		score += 5
 	}
 
-	// 6. Order Flow - 10 points
-	if direction == "LONG" && orderFlow > 0 {
-		score += 10
-	} else if direction == "SHORT" && orderFlow < 0 {
-		score += 10
+	// 6. MACD (Max 5)
+	if (direction == "LONG" && histogram > 0) || (direction == "SHORT" && histogram < 0) {
+		score += 5
 	}
 
-	// 7. SMC (Smart Money Concepts) - 25 points max
+	// 7. SMC (OB/FVG) (Max 15)
+	smcScore := 0
 	if inOB {
 		if (direction == "LONG" && obType == "BULLISH") || (direction == "SHORT" && obType == "BEARISH") {
-			score += 15 // Order Block retest is strong
+			smcScore += 10
 		}
 	}
 	if inFVG {
 		if (direction == "LONG" && fvgType == "BULLISH") || (direction == "SHORT" && fvgType == "BEARISH") {
-			score += 10
+			smcScore += 5
 		}
 	}
+	if smcScore > 15 {
+		smcScore = 15 // Cap at 15
+	}
+	score += smcScore
 
-	// 8. Volume Profile (POC) - 15 points
-	if pocDist <= 1.5 {
-		score += 15 // Near high volume node = high interest
-	} else if pocDist <= 3.0 {
+	// 8. Volume Profile / POC (Max 5)
+	if pocDist <= 2.0 {
 		score += 5
+	}
+
+	// 9. BTC Correlation (Max 10)
+	if btcTrend != "" {
+		if (direction == "LONG" && btcTrend == "UP") || (direction == "SHORT" && btcTrend == "DOWN") {
+			score += 10
+		} else {
+			// Penalty for fighting BTC
+			score -= 20
+		}
+	} else {
+		// No BTC trend data, maybe neutral
+		score += 5
+	}
+
+	// Penalties
+	if volRatio < 0.8 {
+		score -= 10 // Low volume penalty
+	}
+
+	// Boundary Check
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
 	}
 
 	return score

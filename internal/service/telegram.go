@@ -633,16 +633,18 @@ func formatSignalMessage(signal *model.Signal) string {
 		tierEmoji = "✅"
 	}
 
+	// AI Tier Emoji
+	aiTierDisplay := fmt.Sprintf("%s", signal.AITier)
+	if signal.AITier == "PREMIUM" {
+		aiTierDisplay = "🔥 PREMIUM"
+	} else if signal.AITier == "STANDARD" {
+		aiTierDisplay = "✅ STANDARD"
+	} else {
+		aiTierDisplay = "⚠️ " + signal.AITier
+	}
+
 	// Escape AI reason
 	aiReason := escapeHTML(signal.AIReason)
-
-	// Confidence level
-	confidenceLevel := "MEDIUM"
-	if signal.ConfidenceScore >= 0.75 {
-		confidenceLevel = "🔥 HIGH"
-	} else if signal.ConfidenceScore >= 0.60 {
-		confidenceLevel = "✅ GOOD"
-	}
 
 	message := fmt.Sprintf(`%s <b>%s SIGNAL</b> %s
 	
@@ -654,10 +656,13 @@ func formatSignalMessage(signal *model.Signal) string {
 🎯 <b>TP 1:</b> <code>%s</code> (%.2f%%)
 🏆 <b>TP 2:</b> <code>%s</code> (%.2f%%)
 
-🤖 <b>AI Validation:</b> %d/100
-📊 <b>System Confidence:</b> %.0f%% (%s)
+🤖 <b>AI Accuracy:</b> %d/100
+📊 <b>System Score:</b> %d/100
+🏅 <b>Tier Validation:</b>
+  • System: %s
+  • AI Bot: <b>%s</b>
 
-📝 <b>Analysis:</b>
+📝 <b>AI Analysis:</b>
 %s
 
 #%s #%s #MrCrypto
@@ -675,8 +680,9 @@ func formatSignalMessage(signal *model.Signal) string {
 		FormatPrice(signal.TakeProfit2),
 		signal.TP2Percent,
 		signal.AIScore,
-		signal.ConfidenceScore*100,
-		confidenceLevel,
+		signal.ConfluenceScore,
+		signal.Tier,
+		aiTierDisplay,
 		aiReason,
 		signal.Symbol,
 		signal.Type,

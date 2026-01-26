@@ -143,6 +143,7 @@ func (l *Loader) poll() {
 
 		result := aiResults[idx]
 		signal.AIScore = result.Score
+		signal.AITier = result.Tier
 		signal.AIReason = result.Reason
 
 		if result.Score < 70 {
