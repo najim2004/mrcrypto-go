@@ -656,11 +656,11 @@ func formatSignalMessage(signal *model.Signal) string {
 🎯 <b>TP 1:</b> <code>%s</code> (%.2f%%)
 🏆 <b>TP 2:</b> <code>%s</code> (%.2f%%)
 
-🤖 <b>AI Accuracy:</b> %d/100
+🤖 <b>AI Score:</b> %d/100
 📊 <b>System Score:</b> %d/100
 🏅 <b>Tier Validation:</b>
-  • System: %s
-  • AI Bot: <b>%s</b>
+  • %s (System)
+  • <b>%s</b> (AI)
 
 📝 <b>AI Analysis:</b>
 %s

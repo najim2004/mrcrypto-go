@@ -56,15 +56,16 @@ func NewAIService() *AIService {
 
 // AIValidationResult contains the AI's assessment
 type AIValidationResult struct {
-	Score  int    `json:"score"`
-	Tier   string `json:"tier"` // Standard or Premium
-	Reason string `json:"reason"`
+	Score      int    `json:"score"`
+	Confidence int    `json:"confidence"`
+	Tier       string `json:"tier"` // Standard or Premium
+	Reason     string `json:"reason"`
 }
 
 // ValidateSignal sends the signal to Gemini AI for validation with fallback models
-func (s *AIService) ValidateSignal(signal *model.Signal) (int, string, string, error) {
+func (s *AIService) ValidateSignal(signal *model.Signal) (int, int, string, string, error) {
 	if len(s.clients) == 0 {
-		return 0, "", "", fmt.Errorf("no gemini clients initialized")
+		return 0, 0, "", "", fmt.Errorf("no gemini clients initialized")
 	}
 
 	// Calculate volume ratio safely
@@ -133,7 +134,7 @@ Remember: A wrong signal leads to significant financial loss. Only provide high 
 Respond ONLY in the following JSON format.
 CRITICAL: The "reason" field MUST be written in BENGALI (Bangla).
 
-{"score": <0-100>, "tier": "PREMIUM"|"STANDARD"|"REJECT", "reason": "<detailed analysis in BENGALI>"}
+{"score": <0-100>, "confidence": <0-100>, "tier": "PREMIUM"|"STANDARD"|"REJECT", "reason": "<detailed analysis in BENGALI>"}
 `,
 		signal.Symbol,
 		signal.Type,
@@ -202,21 +203,28 @@ CRITICAL: The "reason" field MUST be written in BENGALI (Bangla).
 			var aiResult AIValidationResult
 			if err := json.Unmarshal([]byte(jsonText), &aiResult); err != nil {
 				log.Printf("⚠️  Failed to parse AI response for %s: %v", signal.Symbol, err)
-				return 50, "STANDARD", "AI Parse Error", nil
+				return 50, 0, "STANDARD", "AI Parse Error", nil
 			}
 
 			// Normalize Tier
 			tier := strings.ToUpper(aiResult.Tier)
 			if tier != "PREMIUM" && tier != "STANDARD" {
-				tier = "REJECT" // Default to reject if unknown
+				// Auto-correct tier based on score if missing
+				if aiResult.Score >= 90 {
+					tier = "PREMIUM"
+				} else if aiResult.Score >= 70 {
+					tier = "STANDARD"
+				} else {
+					tier = "REJECT"
+				}
 			}
 
-			log.Printf("✅ [AI] %s - Validated! Score: %d, Tier: %s", signal.Symbol, aiResult.Score, tier)
-			return aiResult.Score, tier, aiResult.Reason, nil
+			log.Printf("✅ [AI] %s - Validated! Score: %d, Confidence: %d, Tier: %s", signal.Symbol, aiResult.Score, aiResult.Confidence, tier)
+			return aiResult.Score, aiResult.Confidence, tier, aiResult.Reason, nil
 		}
 	}
 
-	return 0, "", "", fmt.Errorf("all AI models failed: %w", lastError)
+	return 0, 0, "", "", fmt.Errorf("all AI models failed: %w", lastError)
 }
 
 // BatchValidateSignals validates multiple signals in a single AI call (OPTIMIZED)
@@ -243,10 +251,14 @@ BENGALI ONLY REASONING:
 Explain your decision like a senior mentor teaching a junior trader. You MUST write the "reason" in BENGALI (Bangla).
 
 RESPONSE FORMAT:
-Respond only with a JSON array:
+Respond only with a JSON array. 
+- "score": 0-100 (90+ = Premium, 70-89 = Standard, <70 = Reject)
+- "confidence": 0-100 (Your confidence in this analysis)
+- "tier": "PREMIUM" | "STANDARD" | "REJECT"
+
 [
-  {"signal": 1, "score": <0-100>, "reason": "<Senior Analyst explanation in Bengali>"},
-  {"signal": 2, "score": <0-100>, "reason": "<Senior Analyst explanation in Bengali>"}
+  {"signal": 1, "score": <0-100>, "confidence": <0-100>, "tier": "PREMIUM"|"STANDARD"|"REJECT", "reason": "<Senior Analyst explanation in Bengali>"},
+  {"signal": 2, "score": <0-100>, "confidence": <0-100>, "tier": "PREMIUM"|"STANDARD"|"REJECT", "reason": "<Senior Analyst explanation in Bengali>"}
 ]
 
 SIGNALS TO SCRUTINIZE:
@@ -381,10 +393,11 @@ SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
 
 			// Try to parse as JSON array
 			var results []struct {
-				SignalNum int    `json:"signal"`
-				Score     int    `json:"score"`
-				Tier      string `json:"tier"`
-				Reason    string `json:"reason"`
+				SignalNum  int    `json:"signal"`
+				Score      int    `json:"score"`
+				Confidence int    `json:"confidence"`
+				Tier       string `json:"tier"`
+				Reason     string `json:"reason"`
 			}
 
 			if err := json.Unmarshal([]byte(jsonText), &results); err != nil {
@@ -403,13 +416,23 @@ SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
 			for idx, res := range results {
 				if idx < len(validationResults) {
 					tier := strings.ToUpper(res.Tier)
-					if tier != "PREMIUM" && tier != "STANDARD" {
-						tier = "REJECT"
+
+					// Auto-correct tier based on score if missing or invalid
+					if tier != "PREMIUM" && tier != "STANDARD" && tier != "REJECT" {
+						if res.Score >= 90 {
+							tier = "PREMIUM"
+						} else if res.Score >= 70 {
+							tier = "STANDARD"
+						} else {
+							tier = "REJECT"
+						}
 					}
+
 					validationResults[idx] = AIValidationResult{
-						Score:  res.Score,
-						Tier:   tier,
-						Reason: res.Reason,
+						Score:      res.Score,
+						Confidence: res.Confidence,
+						Tier:       tier,
+						Reason:     res.Reason,
 					}
 				}
 			}

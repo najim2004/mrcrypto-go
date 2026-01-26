@@ -154,6 +154,7 @@ func (l *Loader) poll() {
 
 		result := aiResults[idx]
 		signal.AIScore = result.Score
+		signal.AIConfidence = result.Confidence
 		signal.AITier = result.Tier
 		signal.AIReason = result.Reason
 
