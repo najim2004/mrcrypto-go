@@ -166,3 +166,45 @@ func IsPriceInOB(price float64, obs []OrderBlock) (bool, string) {
 	}
 	return false, ""
 }
+
+// FindLiquiditySweeps identifies Swing Failure Patterns (Liquidity Sweeps)
+// A sweep occurs when price pierces a key high/low but closes back inside range
+func FindLiquiditySweeps(klines []model.Kline) string {
+	if len(klines) < 20 {
+		return ""
+	}
+
+	// Look at recent price action (last 5 candles)
+	lastIdx := len(klines) - 1
+	current := klines[lastIdx]
+
+	// Find distinct swing points in the last 50 candles (excluding lookback window of 5)
+	swingHigh := 0.0
+	swingLow := 999999.0
+
+	// Simple pivot logic loop
+	for i := len(klines) - 50; i < len(klines)-5; i++ {
+		high := klines[i].High
+		low := klines[i].Low
+		if high > swingHigh {
+			swingHigh = high
+		}
+		if low < swingLow {
+			swingLow = low
+		}
+	}
+
+	// CHECK BEARISH SWEEP (High Sweep)
+	// Wick went higher than swingHigh, but Close ended lower than swingHigh
+	if current.High > swingHigh && current.Close < swingHigh {
+		return "Bearish Sweep"
+	}
+
+	// CHECK BULLISH SWEEP (Low Sweep)
+	// Wick went lower than swingLow, but Close ended higher than swingLow
+	if current.Low < swingLow && current.Close > swingLow {
+		return "Bullish Sweep"
+	}
+
+	return ""
+}

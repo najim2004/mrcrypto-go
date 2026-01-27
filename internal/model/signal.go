@@ -74,6 +74,14 @@ type TechnicalContext struct {
 	OBType         string  `json:"ob_type"`         // BULLISH, BEARISH
 	POC            float64 `json:"poc"`
 	POCDistance    float64 `json:"poc_distance"`
+
+	// Advanced Analysis
+	CandlestickPattern string  `json:"candlestick_pattern"` // Hammer, Doji, etc.
+	Divergence         string  `json:"divergence"`          // Bullish, Bearish
+	ATR                float64 `json:"atr"`                 // Volatility
+	StochRSI           float64 `json:"stoch_rsi"`           // Momentum (K)
+	LiquiditySweep     string  `json:"liquidity_sweep"`     // Swing Failure Pattern
+	TrendState         string  `json:"trend_state"`         // Golden Cross, Death Cross
 }
 
 // Signal represents a trading signal

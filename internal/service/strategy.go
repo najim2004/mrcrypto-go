@@ -126,7 +126,8 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	nearestFibPrice, nearestFibName := internalmath.FindNearestFibLevel(currentPrice, fibLevels)
 
 	// ATR for volatility-based stops
-	atr1h := internalmath.CalculateATR(highs1h, lows1h, closes1h, 14)
+	// ATR for volatility-based stops
+	atr1h := indicator.CalculateATR(klines1h, 14)
 
 	// ========================================
 	// STEP 3: INDICATOR CALCULATION
@@ -137,7 +138,11 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	log.Printf("Debug: Calculating RSI for %s...", symbol)
 	rsi4h := indicator.GetLastRSI(closes4h, 14)
 	rsi1h := indicator.GetLastRSI(closes1h, 14)
-	rsi15m := indicator.GetLastRSI(closes15m, 14)
+	rsi15mVec := indicator.CalculateRSI(closes15m, 14) // Vector for advanced analysis
+	rsi15m := 0.0
+	if len(rsi15mVec) > 0 {
+		rsi15m = rsi15mVec[len(rsi15mVec)-1]
+	}
 	rsi5m := indicator.GetLastRSI(closes5m, 14)
 
 	// ADX - Trend strength
@@ -182,6 +187,18 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	pocDist := indicator.GetPOCDistance(currentPrice, vp.POC)
 
 	// ========================================
+	// STEP 3.2: ADVANCED PATTERNS & MOMENTUM
+	// ========================================
+	candlestick := indicator.IdentifyPattern(klines15m)
+	stochK, stochD := indicator.GetLastStochRSI(rsi15mVec, 14, 3, 3)
+	divergence := indicator.DetectDivergence(closes15m, rsi15mVec, 20)
+	liquiditySweep := indicator.FindLiquiditySweeps(klines1h)
+	trendState, _, _ := indicator.CheckTrendState(closes4h, 50, 200)
+
+	log.Printf("📊 [Strategy] %s - Advanced: %s | Div: %s | Sweep: %s | Trend: %s | Stoch: %.1f/%.1f",
+		symbol, candlestick, divergence, liquiditySweep, trendState, stochK, stochD)
+
+	// ========================================
 	// STEP 4: REGIME DETECTION
 	// ========================================
 	// Use 1H and 15m for faster regime detection
@@ -211,11 +228,12 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Calculate Score (Max 100)
 	score := calculateConfluenceScore(
 		signalDir, regime,
-		rsi4h, rsi1h, rsi15m, // Added rsi15m
-		adx4h, adx1h, adx15m, // Added adx15m
+		rsi4h, rsi1h, rsi15m,
+		adx4h, adx1h, adx15m,
 		histogram, volRatio, orderFlowDelta,
 		currentPrice, pivotPoints, fibLevels,
 		btcTrend, inFVG, fvgType, inOB, obType, pocDist,
+		candlestick, divergence, stochK, stochD, liquiditySweep, string(trendState), // New params
 	)
 
 	log.Printf("📊 [Strategy] %s - Confluence Score: %d/100 (Dir: %s)", symbol, score, signalDir)
@@ -385,6 +403,13 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		OBType:         smcOBType,
 		POC:            vp.POC,
 		POCDistance:    pocDist,
+		// Advanced Analysis
+		CandlestickPattern: candlestick,
+		Divergence:         divergence,
+		ATR:                atr1h,
+		StochRSI:           stochK, // Using K line
+		LiquiditySweep:     liquiditySweep,
+		TrendState:         string(trendState),
 	}
 
 	signal := &model.Signal{
@@ -470,6 +495,7 @@ func calculateConfluenceScore(
 	histogram, volRatio, orderFlow float64,
 	price float64, pivots internalmath.PivotPoints, fibs internalmath.FibonacciLevels,
 	btcTrend string, inFVG bool, fvgType string, inOB bool, obType string, pocDist float64,
+	candlestick, divergence string, stochK, stochD float64, liquiditySweep string, trendState string,
 ) int {
 	score := 0
 
@@ -552,6 +578,44 @@ func calculateConfluenceScore(
 			// Penalty for fighting BTC
 			score -= 10
 		}
+	}
+
+	// 10. Candlestick Patterns (Max 5)
+	if candlestick != "" {
+		// Bullish patterns
+		isBullishPattern := (candlestick == "Hammer" || candlestick == "Morning Star" || candlestick == "Bullish Engulfing")
+		// Bearish patterns
+		isBearishPattern := (candlestick == "Shooting Star" || candlestick == "Evening Star" || candlestick == "Bearish Engulfing")
+
+		if direction == "LONG" && isBullishPattern {
+			score += 5
+		} else if direction == "SHORT" && isBearishPattern {
+			score += 5
+		}
+	}
+
+	// 11. Divergence (Max 10)
+	if (direction == "LONG" && divergence == "Bullish") || (direction == "SHORT" && divergence == "Bearish") {
+		score += 10
+	}
+
+	// 12. Liquidity Sweep (Max 10)
+	if (direction == "LONG" && liquiditySweep == "Bullish Sweep") || (direction == "SHORT" && liquiditySweep == "Bearish Sweep") {
+		score += 10
+	}
+
+	// 13. Trend State (MA Cross) (Max 5)
+	if (direction == "LONG" && trendState == "Golden Cross") || (direction == "SHORT" && trendState == "Death Cross") {
+		score += 5
+	}
+
+	// 14. Stochastic RSI (Max 5)
+	// Long: Oversold (< 20) and curving up? Just check extreme.
+	// Short: Overbought (> 80)
+	if direction == "LONG" && stochK < 20 {
+		score += 5
+	} else if direction == "SHORT" && stochK > 80 {
+		score += 5
 	}
 
 	// Penalties

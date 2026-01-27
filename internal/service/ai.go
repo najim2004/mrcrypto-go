@@ -328,6 +328,14 @@ func generateSignalPrompt(signal *model.Signal) string {
 - Volume Ratio: %.2fx (Relative volume vs Average)
 - Order Flow: %.2f (Net buying/selling pressure)
 
+🔬 ADVANCED ANALYSIS (Professional Tools):
+- Candlestick Pattern: %s (Price Action)
+- Divergence: %s (Reversal Signal)
+- Liquidity Sweep: %s (Smart Money Stop Hunt)
+- Trend State: %s (MA Crossover)
+- Volatility (ATR): %.4f
+- Stochastic RSI: %.1f (K-Line)
+
 🎯 LEVELS & MARKET STRUCTURE (SMC):
 - Pivot Levels: Pivot: %s | S1: %s | R1: %s (Support/Resistance)
 - Nearest Pivot: %s (Price distance: %.2f%%)
@@ -360,6 +368,14 @@ func generateSignalPrompt(signal *model.Signal) string {
 		signal.TechnicalContext.Histogram,
 		volRatio,
 		signal.TechnicalContext.OrderFlowDelta,
+		// Advanced Args
+		signal.TechnicalContext.CandlestickPattern,
+		signal.TechnicalContext.Divergence,
+		signal.TechnicalContext.LiquiditySweep,
+		signal.TechnicalContext.TrendState,
+		signal.TechnicalContext.ATR,
+		signal.TechnicalContext.StochRSI,
+		// SMC & Levels
 		FormatPrice(signal.TechnicalContext.PivotPoint),
 		FormatPrice(signal.TechnicalContext.PivotS1),
 		FormatPrice(signal.TechnicalContext.PivotR1),
