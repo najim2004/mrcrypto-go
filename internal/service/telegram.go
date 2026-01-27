@@ -422,14 +422,18 @@ func (s *TelegramService) handleHelp(chatID int64) {
 /pnl - Profit &amp; Loss summary
 /stats - Performance statistics
 /price SYMBOL - Current price check
+/today - আজকের signals
+
+<b>⚙️ Config Commands:</b>
+/symbol add SYMBOL - Watchlist এ coin add করুন (e.g. /symbol add BTCUSDT)
+/symbol del SYMBOL - Watchlist থেকে remove করুন
+/symbol list - Watchlist দেখুন
+/reset - ⚠️ সব signal delete করে database ক্লিয়ার করুন
 
 <b>📈 Info Commands:</b>
 /status - Bot status
-/today - আজকের signals
-
-<b>❓ Help:</b>
-/start - Welcome message
 /help - এই help message
+/start - Welcome message
 
 💡 <b>Tips:</b>
 • প্রতিটি signal এ trading guide দেওয়া আছে
