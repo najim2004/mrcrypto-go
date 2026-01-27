@@ -322,6 +322,7 @@ func generateSignalPrompt(signal *model.Signal) string {
 - **Entry Price:** %s
 - **Stop Loss:** %s (Distance: %.2f%%)
 - **Take Profit:** %s (Distance: %.2f%%)
+- **ATR (1H):** %.4f (Volatility context)
 - **R:R Ratio:** %.2f (MUST be > 2.0 for validity)
 - **Break-Even Win Rate:** %.2f%% (Win rate needed to not lose money)
 - **Kelly Position Size:** %.2f%% (Aggressive sizing based on probability)
@@ -336,12 +337,13 @@ func generateSignalPrompt(signal *model.Signal) string {
 - **ADX (Trend Strength):**
   - 4H: %.1f | 1H: %.1f | 15m: %.1f
   - *Guide: >25 indicates a STRONG trend. <20 indicates weak/choppy market.*
-- **MACD Histogram (5m):** %.6f
+- **MACD (5m):** Line: %.6f | Signal: %.6f | Hist: %.6f
   - *Guide: Positive = Bullish momentum, Negative = Bearish momentum.*
 - **Trend State:** %s (e.g., Golden Cross = Bullish, Death Cross = Bearish)
 
 🌊 **VOLUME & FLOW (The "Fuel"):**
 *Interpretation: Price moves without volume are often fake-outs.*
+- **VWAP:** %.4f (Volume Weighted Average Price)
 - **Volume Ratio:** %.2fx (Current vs Avg)
   - *Guide: >1.5x confirms breakouts/moves. <1.0x suggests weak participation.*
 - **Order Flow Delta:** %.2f
@@ -390,6 +392,7 @@ Provide your expert verdict.
 		signal.RiskPercent,
 		FormatPrice(signal.TakeProfit),
 		signal.RewardPercent,
+		signal.TechnicalContext.ATR,
 		signal.RiskRewardRatio,
 		signal.BreakEvenWinRate,
 		signal.RecommendedSize,
@@ -401,8 +404,11 @@ Provide your expert verdict.
 		signal.TechnicalContext.ADX4h,
 		signal.TechnicalContext.ADX1h,
 		signal.TechnicalContext.ADX15m,
+		signal.TechnicalContext.MACD,
+		signal.TechnicalContext.Signal,
 		signal.TechnicalContext.Histogram,
 		signal.TechnicalContext.TrendState,
+		signal.TechnicalContext.VWAP,
 		volRatio,
 		signal.TechnicalContext.OrderFlowDelta,
 		FormatPrice(signal.TechnicalContext.PivotPoint),
