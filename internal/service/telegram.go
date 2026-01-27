@@ -558,21 +558,6 @@ Symbol টি সঠিক আছে কিনা চেক করুন।`, sy
 	s.sendMessage(msg.Chat.ID, message)
 }
 
-// Helper functions
-func getPnLEmoji(pnl float64) string {
-	if pnl > 0 {
-		return "🟢 +"
-	}
-	return "🔴 "
-}
-
-func getPnLSign(pnl float64) string {
-	if pnl > 0 {
-		return "+"
-	}
-	return ""
-}
-
 func (s *TelegramService) sendMessage(chatID int64, message string) {
 	msg := tgbotapi.NewMessage(chatID, message)
 	msg.ParseMode = "HTML"
@@ -607,88 +592,6 @@ func (s *TelegramService) SendMessage(message string) error {
 	}
 
 	return nil
-}
-
-// escapeHTML escapes HTML special characters for Telegram
-func escapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	return s
-}
-
-// formatSignalMessage creates a formatted message for Telegram in Bangla with trading guidance
-func formatSignalMessage(signal *model.Signal) string {
-	// Emoji based on signal type and tier
-	var signalEmoji, tierEmoji string
-	if signal.Type == model.SignalTypeLong {
-		signalEmoji = "🟢"
-	} else {
-		signalEmoji = "🔴"
-	}
-
-	if signal.Tier == model.TierPremium {
-		tierEmoji = "🔥"
-	} else {
-		tierEmoji = "✅"
-	}
-
-	// AI Tier Emoji
-	aiTierDisplay := fmt.Sprintf("%s", signal.AITier)
-	if signal.AITier == "PREMIUM" {
-		aiTierDisplay = "🔥 PREMIUM"
-	} else if signal.AITier == "STANDARD" {
-		aiTierDisplay = "✅ STANDARD"
-	} else {
-		aiTierDisplay = "⚠️ " + signal.AITier
-	}
-
-	// Escape AI reason
-	aiReason := escapeHTML(signal.AIReason)
-
-	message := fmt.Sprintf(`%s <b>%s SIGNAL</b> %s
-	
-<b>%s</b> | %s
-
-🚀 <b>ENTRY:</b> <code>%s</code>
-🛑 <b>SL:</b> <code>%s</code> (%.2f%%)
-
-🎯 <b>TP 1:</b> <code>%s</code> (%.2f%%)
-🏆 <b>TP 2:</b> <code>%s</code> (%.2f%%)
-
-🤖 <b>AI Score:</b> %d/100
-📊 <b>System Score:</b> %d/100
-🏅 <b>Tier Validation:</b>
-  • %s (System)
-  • <b>%s</b> (AI)
-
-📝 <b>AI Analysis:</b>
-%s
-
-#%s #%s #MrCrypto
-`,
-		signalEmoji,
-		signal.Type,
-		tierEmoji,
-		signal.Symbol,
-		signal.Tier,
-		FormatPrice(signal.EntryPrice),
-		FormatPrice(signal.StopLoss),
-		signal.RiskPercent,
-		FormatPrice(signal.TakeProfit1),
-		signal.TP1Percent,
-		FormatPrice(signal.TakeProfit2),
-		signal.TP2Percent,
-		signal.AIScore,
-		signal.ConfluenceScore,
-		signal.Tier,
-		aiTierDisplay,
-		aiReason,
-		signal.Symbol,
-		signal.Type,
-	)
-
-	return message
 }
 
 func calculatePercentChange(from, to float64) float64 {

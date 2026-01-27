@@ -71,7 +71,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	if symbol != "BTCUSDT" {
 		btcKlines4h, err := s.binance.GetKlines("BTCUSDT", "4h", 200)
 		if err == nil {
-			btcCloses := extractCloses(btcKlines4h)
+			btcCloses, _, _, _ := extractSeries(btcKlines4h)
 			btcEma50 := indicator.CalculateEMA(btcCloses, 50)
 			if len(btcEma50) > 0 {
 				lastBtcPrice := btcCloses[len(btcCloses)-1]
@@ -88,22 +88,10 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	}
 
 	// Extract price arrays
-	closes4h := extractCloses(klines4h)
-	highs4h := extractHighs(klines4h)
-	lows4h := extractLows(klines4h)
-
-	closes1h := extractCloses(klines1h)
-	highs1h := extractHighs(klines1h)
-	lows1h := extractLows(klines1h)
-
-	closes15m := extractCloses(klines15m)
-	highs15m := extractHighs(klines15m)
-	lows15m := extractLows(klines15m)
-
-	closes5m := extractCloses(klines5m)
-	highs5m := extractHighs(klines5m)
-	lows5m := extractLows(klines5m)
-	volumes5m := extractVolumes(klines5m)
+	closes4h, highs4h, lows4h, _ := extractSeries(klines4h)
+	closes1h, highs1h, lows1h, _ := extractSeries(klines1h)
+	closes15m, highs15m, lows15m, _ := extractSeries(klines15m)
+	closes5m, highs5m, lows5m, volumes5m := extractSeries(klines5m)
 
 	currentPrice := closes5m[len(closes5m)-1]
 
@@ -196,14 +184,15 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// ========================================
 	// STEP 4: REGIME DETECTION
 	// ========================================
-	regime := detectRegimePro(adx4h, adx1h, currentPrice, ema50Value)
+	// Use 1H and 15m for faster regime detection
+	regime := detectRegimePro(adx1h, adx15m, currentPrice, ema50Value)
 
-	log.Printf("ℹ️  [Strategy] %s - Regime: %s (ADX4h: %.1f, ADX1h: %.1f)",
-		symbol, regime, adx4h, adx1h)
+	log.Printf("ℹ️  [Strategy] %s - Regime: %s (ADX1h: %.1f, ADX15m: %.1f)",
+		symbol, regime, adx1h, adx15m)
 
 	// Skip choppy markets early
 	if regime == model.RegimeChoppy {
-		log.Printf("⏭️  [Strategy] %s - Skipped (choppy ADX < 15)", symbol)
+		log.Printf("⏭️  [Strategy] %s - Skipped (choppy ADX < 20)", symbol)
 		return nil, nil
 	}
 
@@ -222,8 +211,8 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Calculate Score (Max 100)
 	score := calculateConfluenceScore(
 		signalDir, regime,
-		rsi4h, rsi1h,
-		adx4h, adx1h,
+		rsi4h, rsi1h, rsi15m, // Added rsi15m
+		adx4h, adx1h, adx15m, // Added adx15m
 		histogram, volRatio, orderFlowDelta,
 		currentPrice, pivotPoints, fibLevels,
 		btcTrend, inFVG, fvgType, inOB, obType, pocDist,
@@ -433,14 +422,14 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 }
 
 // detectRegimePro uses multi-timeframe ADX for better regime detection
-func detectRegimePro(adx4h, adx1h, price, ema50 float64) model.MarketRegime {
-	avgADX := (adx4h + adx1h) / 2
+func detectRegimePro(adx1h, adx15m, price, ema50 float64) model.MarketRegime {
+	avgADX := (adx1h + adx15m) / 2
 
-	if avgADX < 15 {
+	if avgADX < 20 {
 		return model.RegimeChoppy
 	}
 
-	if avgADX < 20 {
+	if avgADX < 25 {
 		return model.RegimeRanging
 	}
 
@@ -465,19 +454,19 @@ func determineSignalDirection(regime model.MarketRegime, price, ema50, rsi4h flo
 // calculateConfluenceScore calculates strict weighted score (Max 100)
 //
 // WEIGTHS DISTRIBUTION (TOTAL: 100):
-// 1. Trend Alignment: 		20
-// 2. RSI Momentum: 		15
+// 1. Trend Alignment: 		20 (1h + 15m)
+// 2. RSI Momentum: 		25 (15m Priority)
 // 3. Key Level: 			15
 // 4. Volume: 				10
 // 5. Order Flow: 			5
 // 6. MACD:					5
-// 7. SMC (OB/FVG): 		15
+// 7. SMC (OB/FVG): 		10
 // 8. Volume Profile (POC): 5
-// 9. BTC Correlation: 		10
+// 9. BTC Correlation: 		5
 func calculateConfluenceScore(
 	direction string, regime model.MarketRegime,
-	rsi4h, rsi1h float64,
-	adx4h, adx1h float64,
+	rsi4h, rsi1h, rsi15m float64,
+	adx4h, adx1h, adx15m float64,
 	histogram, volRatio, orderFlow float64,
 	price float64, pivots internalmath.PivotPoints, fibs internalmath.FibonacciLevels,
 	btcTrend string, inFVG bool, fvgType string, inOB bool, obType string, pocDist float64,
@@ -485,25 +474,27 @@ func calculateConfluenceScore(
 	score := 0
 
 	// 1. Trend Alignment (Max 20)
-	// Strong trend in both 4H and 1H
-	if adx4h > 20 && adx1h > 20 {
+	// Strong trend in both 1H and 15m
+	if adx1h > 25 && adx15m > 25 {
 		score += 20
-	} else if adx4h > 20 || adx1h > 20 {
+	} else if adx1h > 25 || adx15m > 25 {
 		score += 10
 	}
 
-	// 2. RSI Momentum (Max 15)
+	// 2. RSI Momentum (Max 25) - 15m Priority for entries
 	if direction == "LONG" {
-		if rsi4h > 40 && rsi4h < 65 && rsi1h > 45 && rsi1h < 70 {
-			score += 15 // Perfect zone
-		} else if rsi4h > 35 && rsi4h < 75 {
-			score += 5 // Acceptable
+		// Ideal entry: 15m RSI oversold (pullback) in uptrend
+		if rsi15m < 45 && rsi15m > 30 {
+			score += 25 // Perfect pullback entry
+		} else if rsi15m < 60 && rsi1h < 70 {
+			score += 15 // Good continuation
 		}
 	} else {
-		if rsi4h > 35 && rsi4h < 60 && rsi1h > 30 && rsi1h < 55 {
-			score += 15
-		} else if rsi4h > 25 && rsi4h < 65 {
-			score += 5
+		// Ideal entry: 15m RSI overbought (pullback) in downtrend
+		if rsi15m > 55 && rsi15m < 70 {
+			score += 25 // Perfect pullback entry
+		} else if rsi15m > 40 && rsi1h > 30 {
+			score += 15 // Good continuation
 		}
 	}
 
@@ -511,9 +502,9 @@ func calculateConfluenceScore(
 	pivotDist := getPivotDistance(price, pivots)
 	fibDist := getFibDistance(price, fibs)
 
-	if pivotDist <= 1.0 || fibDist <= 1.0 {
+	if pivotDist <= 1.5 || fibDist <= 1.5 {
 		score += 15
-	} else if pivotDist <= 2.0 || fibDist <= 2.0 {
+	} else if pivotDist <= 2.5 || fibDist <= 2.5 {
 		score += 8
 	}
 
@@ -534,20 +525,17 @@ func calculateConfluenceScore(
 		score += 5
 	}
 
-	// 7. SMC (OB/FVG) (Max 15)
+	// 7. SMC (OB/FVG) (Max 10)
 	smcScore := 0
 	if inOB {
 		if (direction == "LONG" && obType == "BULLISH") || (direction == "SHORT" && obType == "BEARISH") {
-			smcScore += 10
+			smcScore += 5
 		}
 	}
 	if inFVG {
 		if (direction == "LONG" && fvgType == "BULLISH") || (direction == "SHORT" && fvgType == "BEARISH") {
 			smcScore += 5
 		}
-	}
-	if smcScore > 15 {
-		smcScore = 15 // Cap at 15
 	}
 	score += smcScore
 
@@ -556,17 +544,14 @@ func calculateConfluenceScore(
 		score += 5
 	}
 
-	// 9. BTC Correlation (Max 10)
+	// 9. BTC Correlation (Max 5)
 	if btcTrend != "" {
 		if (direction == "LONG" && btcTrend == "UP") || (direction == "SHORT" && btcTrend == "DOWN") {
-			score += 10
+			score += 5
 		} else {
 			// Penalty for fighting BTC
-			score -= 20
+			score -= 10
 		}
-	} else {
-		// No BTC trend data, maybe neutral
-		score += 5
 	}
 
 	// Penalties
@@ -668,94 +653,4 @@ func getNextSupport(price float64, pivots internalmath.PivotPoints) float64 {
 	}
 
 	return nextSup
-}
-
-// ========================================
-// UTILITY FUNCTIONS
-// ========================================
-
-func extractCloses(klines []model.Kline) []float64 {
-	closes := make([]float64, len(klines))
-	for i, k := range klines {
-		closes[i] = k.Close
-	}
-	return closes
-}
-
-func extractHighs(klines []model.Kline) []float64 {
-	highs := make([]float64, len(klines))
-	for i, k := range klines {
-		highs[i] = k.High
-	}
-	return highs
-}
-
-func extractLows(klines []model.Kline) []float64 {
-	lows := make([]float64, len(klines))
-	for i, k := range klines {
-		lows[i] = k.Low
-	}
-	return lows
-}
-
-func extractVolumes(klines []model.Kline) []float64 {
-	volumes := make([]float64, len(klines))
-	for i, k := range klines {
-		volumes[i] = k.Volume
-	}
-	return volumes
-}
-
-func calculateAverage(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
-}
-
-func calculateOrderFlowDelta(klines []model.Kline) float64 {
-	delta := 0.0
-	start := len(klines) - 20
-	if start < 0 {
-		start = 0
-	}
-
-	for i := start; i < len(klines); i++ {
-		k := klines[i]
-		if k.Close > k.Open {
-			delta += k.Volume
-		} else {
-			delta -= k.Volume
-		}
-	}
-	return delta
-}
-
-func CalculateDynamicDecimals(price float64) int {
-	if price < 0.00001 {
-		return 8
-	} else if price < 0.0001 {
-		return 7
-	} else if price < 0.001 {
-		return 6
-	} else if price < 0.01 {
-		return 5
-	} else if price < 0.1 {
-		return 4
-	} else if price < 1 {
-		return 3
-	} else if price < 10 {
-		return 2
-	}
-	return 2
-}
-
-func FormatPrice(price float64) string {
-	decimals := CalculateDynamicDecimals(price)
-	format := fmt.Sprintf("%%.%df", decimals)
-	return fmt.Sprintf(format, price)
 }

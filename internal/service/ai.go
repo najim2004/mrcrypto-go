@@ -68,57 +68,19 @@ func (s *AIService) ValidateSignal(signal *model.Signal) (int, int, string, stri
 		return 0, 0, "", "", fmt.Errorf("no gemini clients initialized")
 	}
 
-	// Calculate volume ratio safely
-	volRatio := 0.0
-	if signal.TechnicalContext.AvgVol > 0 {
-		volRatio = signal.TechnicalContext.CurrentVol / signal.TechnicalContext.AvgVol
-	}
-
+	// Calculate volume ratio safely (redundant here but kept for context if needed, otherwise remove. Helper handles it too)
+	// Construct the full prompt
 	prompt := fmt.Sprintf(`You are a Professional Crypto Trading Analyst and Hedge Fund Manager with 15+ years of experience. Your task is to perform a rigorous analysis of the following trading signal to ensure maximum accuracy.
 
 Remember: A wrong signal leads to significant financial loss. Only provide high scores if there is strong confluence.
 
-╔══════════════════════════════════════════════════════════════╗
-                    🔔 SIGNAL DETAILS
-╚══════════════════════════════════════════════════════════════╝
-
-📌 Pair: %s (Trading Symbol)
-📌 Direction: %s (Trade type: BUY/SELL)
-📌 System Tier: %s (Based on technicals)
-📌 Market Regime: %s (Current market condition)
-
-💰 RISK MANAGEMENT:
-🎯 Entry: %s
-🛑 Stop Loss: %s (Risk: %.2f%%)
-🏆 Take Profit: %s (Reward: %.2f%%)
-📊 R:R Ratio: %.2f
-
-📊 TECHNICAL INDICATORS:
-• RSI (4H/1H/15M): %.1f / %.1f / %.1f
-• ADX (4H/1H): %.1f / %.1f
-• MACD Histogram: %.6f
-• Volume Ratio: %.2fx
-• Order Flow Delta: %.2f
-• VWAP: %s
-
-🎯 KEY LEVELS:
-• Pivot Points: %s (S1: %s, R1: %s)
-• Nearest Pivot: %s
-• Nearest Fib: %s (Dist: %.2f%%)
-
-🏛️ SMC & CONFLUENCE:
-• BTC Correlation: %s
-• Order Block (OB): %s
-• Fair Value Gap (FVG): %s
-• Volume POC: %s (Dist: %.2f%%)
-• System Confluence: %d/100
-• System Confidence: %.1f%%
+%s
 
 ╔══════════════════════════════════════════════════════════════╗
                 🔍 ANALYSIS GUIDELINES
 ╚══════════════════════════════════════════════════════════════╝
 
-1. **Multi-Timeframe Alignment:** Are 4H and 1H trends aligned?
+1. **Multi-Timeframe Alignment:** Are 4H and 1H trends aligned? Does 15M support entry?
 2. **Volume & Momentum:** Is Volume > Avg? Does MACD support direction?
 3. **Key Level:** Is price reacting to a major level?
 4. **Risk/Reward:** Is R:R > 2.0?
@@ -135,40 +97,7 @@ Respond ONLY in the following JSON format.
 CRITICAL: The "reason" field MUST be written in BENGALI (Bangla).
 
 {"score": <0-100>, "confidence": <0-100>, "tier": "PREMIUM"|"STANDARD"|"REJECT", "reason": "<detailed analysis in BENGALI>"}
-`,
-		signal.Symbol,
-		signal.Type,
-		signal.Tier,
-		signal.Regime,
-		FormatPrice(signal.EntryPrice),
-		FormatPrice(signal.StopLoss),
-		signal.RiskPercent,
-		FormatPrice(signal.TakeProfit),
-		signal.RewardPercent,
-		signal.RiskRewardRatio,
-		signal.TechnicalContext.RSI4h,
-		signal.TechnicalContext.RSI1h,
-		signal.TechnicalContext.RSI15m,
-		signal.TechnicalContext.ADX4h,
-		signal.TechnicalContext.ADX1h,
-		signal.TechnicalContext.Histogram,
-		volRatio,
-		signal.TechnicalContext.OrderFlowDelta,
-		FormatPrice(signal.TechnicalContext.VWAP),
-		FormatPrice(signal.TechnicalContext.PivotPoint),
-		FormatPrice(signal.TechnicalContext.PivotS1),
-		FormatPrice(signal.TechnicalContext.PivotR1),
-		signal.TechnicalContext.NearestPivot,
-		signal.TechnicalContext.NearestFib,
-		signal.NearestLevelDist,
-		signal.TechnicalContext.BTCCorrelation,
-		signal.TechnicalContext.OBType,
-		signal.TechnicalContext.FVGType,
-		FormatPrice(signal.TechnicalContext.POC),
-		signal.TechnicalContext.POCDistance,
-		signal.ConfluenceScore,
-		signal.ConfidenceScore*100,
-	)
+`, generateSignalPrompt(signal))
 
 	// List of models to try in order (fallback)
 	models := []string{
@@ -264,82 +193,9 @@ Respond only with a JSON array.
 SIGNALS TO SCRUTINIZE:
 `
 
-	for idx, signal := range signals {
-		// Calculate volume ratio safely
-		volRatio := 0.0
-		if signal.TechnicalContext.AvgVol > 0 {
-			volRatio = signal.TechnicalContext.CurrentVol / signal.TechnicalContext.AvgVol
-		}
-
-		prompt += fmt.Sprintf(`
-━━━━━━━━━━ SIGNAL %d ━━━━━━━━━━
-📌 Symbol: %s | Direction: %s | Tier: %s | Regime: %s (Market Cycle)
-
-💰 RISK & REWARD (Position Management):
-- Entry Price: %s (Current Market Level)
-- Stop Loss: %s (Exit if hit, Risk: %.2f%%)
-- Take Profit: %s (Target exit, Reward: %.2f%%)
-- R:R Ratio: %.2f (Reward-to-Risk)
-- Break-Even Win Rate: %.2f%% (Statistically required)
-- Rec. Position Size: %.2f%% (Kelly Criterion allocation)
-
-📊 TECHNICAL INDICATORS (Momentum & Trend):
-- RSI (4H/1H/15M/5M): %.1f/%.1f/%.1f/%.1f (Strength: >70 Overbought, <30 Oversold)
-- ADX (4H/1H/15M): %.1f/%.1f/%.1f (Trend Intensity: >25 Strong)
-- MACD Histogram: %.6f (Momentum Direction)
-- Volume Ratio: %.2fx (Relative volume vs Average)
-- Order Flow: %.2f (Net buying/selling pressure)
-
-🎯 LEVELS & MARKET STRUCTURE (SMC):
-- Pivot Levels: Pivot: %s | S1: %s | R1: %s (Support/Resistance)
-- Nearest Pivot: %s (Price distance: %.2f%%)
-- Fibonacci: 50.0%%: %s | 61.8%%: %s | Nearest: %s (Retracement zones)
-- BTC Trend: %s (Overall market correlation)
-- Smart Money: OB: %s (Order Block) | FVG: %s (Fair Value Gap)
-- Volume Profile: POC: %s (Dist: %.2f%%) (Point of Control)
-- System Confluence: %d/100 | Confidence: %.1f%% (Internal probability)
-
-SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
-`,
-			idx+1,
-			signal.Symbol,
-			signal.Type,
-			signal.Tier,
-			signal.Regime,
-			FormatPrice(signal.EntryPrice),
-			FormatPrice(signal.StopLoss),
-			signal.RiskPercent,
-			FormatPrice(signal.TakeProfit),
-			signal.RewardPercent,
-			signal.RiskRewardRatio,
-			signal.BreakEvenWinRate,
-			signal.RecommendedSize,
-			signal.TechnicalContext.RSI4h,
-			signal.TechnicalContext.RSI1h,
-			signal.TechnicalContext.RSI15m,
-			signal.TechnicalContext.RSI5m,
-			signal.TechnicalContext.ADX4h,
-			signal.TechnicalContext.ADX1h,
-			signal.TechnicalContext.ADX15m,
-			signal.TechnicalContext.Histogram,
-			volRatio,
-			signal.TechnicalContext.OrderFlowDelta,
-			FormatPrice(signal.TechnicalContext.PivotPoint),
-			FormatPrice(signal.TechnicalContext.PivotS1),
-			FormatPrice(signal.TechnicalContext.PivotR1),
-			signal.TechnicalContext.NearestPivot,
-			signal.NearestLevelDist,
-			FormatPrice(signal.TechnicalContext.Fib500),
-			FormatPrice(signal.TechnicalContext.Fib618),
-			signal.TechnicalContext.NearestFib,
-			signal.TechnicalContext.BTCCorrelation,
-			signal.TechnicalContext.OBType,
-			signal.TechnicalContext.FVGType,
-			FormatPrice(signal.TechnicalContext.POC),
-			signal.TechnicalContext.POCDistance,
-			signal.ConfluenceScore,
-			signal.ConfidenceScore*100,
-		)
+	for _, signal := range signals {
+		// Append each signal's details
+		prompt += generateSignalPrompt(signal)
 	}
 
 	// List of models to try in order (fallback)
@@ -443,6 +299,83 @@ SENIOR ANALYST DECISION (Rigorous Bengali Analysis):
 	}
 
 	return nil, fmt.Errorf("unexpected error: %w", lastError)
+}
+
+// validateSignalInternal helper to generate prompt text
+func generateSignalPrompt(signal *model.Signal) string {
+	// Calculate volume ratio safely
+	volRatio := 0.0
+	if signal.TechnicalContext.AvgVol > 0 {
+		volRatio = signal.TechnicalContext.CurrentVol / signal.TechnicalContext.AvgVol
+	}
+
+	return fmt.Sprintf(`
+━━━━━━━━━━ SIGNAL %s ━━━━━━━━━━
+📌 Symbol: %s | Direction: %s | Tier: %s | Regime: %s (Market Cycle)
+
+💰 RISK & REWARD (Position Management):
+- Entry Price: %s (Current Market Level)
+- Stop Loss: %s (Exit if hit, Risk: %.2f%%)
+- Take Profit: %s (Target exit, Reward: %.2f%%)
+- R:R Ratio: %.2f (Reward-to-Risk)
+- Break-Even Win Rate: %.2f%% (Statistically required)
+- Rec. Position Size: %.2f%% (Kelly Criterion allocation)
+
+📊 TECHNICAL INDICATORS (Momentum & Trend):
+- RSI (4H/1H/15M/5M): %.1f/%.1f/%.1f/%.1f (Strength: >70 Overbought, <30 Oversold)
+- ADX (4H/1H/15M): %.1f/%.1f/%.1f (Trend Intensity: >25 Strong)
+- MACD Histogram: %.6f (Momentum Direction)
+- Volume Ratio: %.2fx (Relative volume vs Average)
+- Order Flow: %.2f (Net buying/selling pressure)
+
+🎯 LEVELS & MARKET STRUCTURE (SMC):
+- Pivot Levels: Pivot: %s | S1: %s | R1: %s (Support/Resistance)
+- Nearest Pivot: %s (Price distance: %.2f%%)
+- Fibonacci: 50.0%%: %s | 61.8%%: %s | Nearest: %s (Retracement zones)
+- BTC Trend: %s (Overall market correlation)
+- Smart Money: OB: %s (Order Block) | FVG: %s (Fair Value Gap)
+- Volume Profile: POC: %s (Dist: %.2f%%) (Point of Control)
+- System Confluence: %d/100 | Confidence: %.1f%% (Internal probability)
+`,
+		signal.Symbol,
+		signal.Symbol,
+		signal.Type,
+		signal.Tier,
+		signal.Regime,
+		FormatPrice(signal.EntryPrice),
+		FormatPrice(signal.StopLoss),
+		signal.RiskPercent,
+		FormatPrice(signal.TakeProfit),
+		signal.RewardPercent,
+		signal.RiskRewardRatio,
+		signal.BreakEvenWinRate,
+		signal.RecommendedSize,
+		signal.TechnicalContext.RSI4h,
+		signal.TechnicalContext.RSI1h,
+		signal.TechnicalContext.RSI15m,
+		signal.TechnicalContext.RSI5m,
+		signal.TechnicalContext.ADX4h,
+		signal.TechnicalContext.ADX1h,
+		signal.TechnicalContext.ADX15m,
+		signal.TechnicalContext.Histogram,
+		volRatio,
+		signal.TechnicalContext.OrderFlowDelta,
+		FormatPrice(signal.TechnicalContext.PivotPoint),
+		FormatPrice(signal.TechnicalContext.PivotS1),
+		FormatPrice(signal.TechnicalContext.PivotR1),
+		signal.TechnicalContext.NearestPivot,
+		signal.NearestLevelDist,
+		FormatPrice(signal.TechnicalContext.Fib500),
+		FormatPrice(signal.TechnicalContext.Fib618),
+		signal.TechnicalContext.NearestFib,
+		signal.TechnicalContext.BTCCorrelation,
+		signal.TechnicalContext.OBType,
+		signal.TechnicalContext.FVGType,
+		FormatPrice(signal.TechnicalContext.POC),
+		signal.TechnicalContext.POCDistance,
+		signal.ConfluenceScore,
+		signal.ConfidenceScore*100,
+	)
 }
 
 // extractJSONFromMarkdown removes markdown code block markers
