@@ -28,13 +28,12 @@ func NewSignalMonitor(db *mongo.Database, binance *service.BinanceService, teleg
 	}
 }
 
-// MonitorActiveSignals checks all active signals for TP/SL hits and reversals
-func (sm *SignalMonitor) MonitorActiveSignals() {
+// CheckActiveSignalsAgainstPrices checks active signals using externally provided prices
+func (sm *SignalMonitor) CheckActiveSignalsAgainstPrices(prices map[string]float64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Find all active signals created TODAY
-	// This prevents monitoring stale signals from previous days
 	today := time.Now().Truncate(24 * time.Hour)
 	filter := bson.M{
 		"status":     "ACTIVE",
@@ -58,11 +57,23 @@ func (sm *SignalMonitor) MonitorActiveSignals() {
 		return // No active signals to monitor
 	}
 
-	log.Printf("👀 [Monitor] Monitoring %d active signals...", len(signals))
+	log.Printf("👀 [Monitor] Checking %d active signals against scanned prices...", len(signals))
 
-	// Check each signal
+	// Check each signal if we have a fresh price for it
 	for _, signal := range signals {
-		sm.checkSignal(&signal)
+		if price, ok := prices[signal.Symbol]; ok {
+			sm.checkSignalWithPrice(&signal, price)
+		}
+	}
+}
+
+// checkSignalWithPrice checks individual signal using provided price
+func (sm *SignalMonitor) checkSignalWithPrice(signal *model.Signal, currentPrice float64) {
+	// Check TP/SL based on signal type
+	if signal.Type == model.SignalTypeLong {
+		sm.checkLongSignal(signal, currentPrice)
+	} else {
+		sm.checkShortSignal(signal, currentPrice)
 	}
 }
 

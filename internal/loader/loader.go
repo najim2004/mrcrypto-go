@@ -19,9 +19,11 @@ type Loader struct {
 	telegram      *service.TelegramService
 	database      *service.DatabaseService
 	signalMonitor *monitor.SignalMonitor
+	symbolManager *service.SymbolManager
 	isPolling     bool
 }
 
+// NewLoader creates a new loader instance
 // NewLoader creates a new loader instance
 func NewLoader(
 	binance *service.BinanceService,
@@ -30,6 +32,7 @@ func NewLoader(
 	telegram *service.TelegramService,
 	database *service.DatabaseService,
 	signalMonitor *monitor.SignalMonitor,
+	symbolManager *service.SymbolManager,
 ) *Loader {
 	return &Loader{
 		binance:       binance,
@@ -38,6 +41,7 @@ func NewLoader(
 		telegram:      telegram,
 		database:      database,
 		signalMonitor: signalMonitor,
+		symbolManager: symbolManager,
 		isPolling:     false,
 	}
 }
@@ -49,6 +53,7 @@ func (l *Loader) Start() {
 	c := cron.New()
 
 	// Run signal generation every 1 minute
+	// Monitoring is now "piggybacked" on this poll cycle
 	c.AddFunc("@every 1m", func() {
 		if l.isPolling {
 			log.Println("⏭️  Skipping cycle - previous poll still running")
@@ -58,16 +63,9 @@ func (l *Loader) Start() {
 		l.poll()
 	})
 
-	// Run active signal monitoring every 30 seconds
-	c.AddFunc("@every 30s", func() {
-		if l.signalMonitor != nil {
-			l.signalMonitor.MonitorActiveSignals()
-		}
-	})
-
 	c.Start()
 
-	log.Println("⏰ Scheduler started - polling every 1 minute, monitoring every 30 seconds")
+	log.Println("⏰ Scheduler started - scanning & monitoring every 1 minute")
 
 	// Keep the program running
 	select {}
@@ -84,14 +82,19 @@ func (l *Loader) poll() {
 	log.Printf("🔄 Polling started at %s", time.Now().Format("15:04:05"))
 	log.Println("===========================================")
 
-	// Fetch all trading symbols
-	symbols, err := l.binance.GetAllSymbols()
+	// Fetch watchlist
+	symbols, err := l.symbolManager.GetWatchlist()
 	if err != nil {
-		log.Printf("❌ Failed to fetch symbols: %v", err)
+		log.Printf("❌ Failed to fetch watchlist: %v", err)
 		return
 	}
 
-	log.Printf("📊 Fetched %d symbols", len(symbols))
+	if len(symbols) == 0 {
+		log.Println("⚠️  Watchlist is empty. Add symbols using /symbol add")
+		return
+	}
+
+	log.Printf("📊 Scanning %d symbols", len(symbols))
 
 	// Create worker pool with 10 workers
 	log.Printf("🔄 [Loader] Creating worker pool with 10 workers...")
@@ -104,8 +107,14 @@ func (l *Loader) poll() {
 		pool.AddJob(symbol)
 	}
 
-	// Wait for all workers to complete and collect signals
-	signals := pool.Wait()
+	// Wait for all workers to complete and collect signals AND prices
+	signals, prices := pool.Wait()
+
+	// PIGGYBACK MONITORING: Check active signals using the fresh prices we just fetched
+	if l.signalMonitor != nil && len(prices) > 0 {
+		log.Println("👀 [Loader] Triggering Piggyback Monitoring...")
+		l.signalMonitor.CheckActiveSignalsAgainstPrices(prices)
+	}
 
 	log.Printf("📈 Generated %d potential signals", len(signals))
 

@@ -19,20 +19,25 @@ func main() {
 	log.Println("🔧 Initializing services...")
 
 	// Initialize services
+	// Initialize services
 	binanceService := service.NewBinanceService()
 	strategyService := service.NewStrategyService(binanceService)
 	aiService := service.NewAIService()
 
-	telegramService, err := service.NewTelegramService(binanceService)
-	if err != nil {
-		log.Fatalf("❌ Failed to initialize Telegram service: %v", err)
-	}
-
+	// Create Database service first as SymbolManager needs it
 	databaseService, err := service.NewDatabaseService()
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize Database service: %v", err)
 	}
 	defer databaseService.Close()
+
+	// Initialize Symbol Manager
+	symbolManager := service.NewSymbolManager(databaseService.GetDB())
+
+	telegramService, err := service.NewTelegramService(binanceService, symbolManager)
+	if err != nil {
+		log.Fatalf("❌ Failed to initialize Telegram service: %v", err)
+	}
 
 	// Initialize Signal Monitor for active trade monitoring
 	signalMonitor := monitor.NewSignalMonitor(
@@ -51,6 +56,7 @@ func main() {
 		telegramService,
 		databaseService,
 		signalMonitor,
+		symbolManager,
 	)
 
 	// Handle graceful shutdown

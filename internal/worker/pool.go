@@ -8,10 +8,16 @@ import (
 	"mrcrypto-go/internal/service"
 )
 
+type ScanResult struct {
+	Signal *model.Signal
+	Symbol string
+	Price  float64
+}
+
 type WorkerPool struct {
 	workers  int
 	jobs     chan string
-	results  chan *model.Signal
+	results  chan ScanResult
 	wg       sync.WaitGroup
 	strategy *service.StrategyService
 }
@@ -21,7 +27,7 @@ func NewPool(workers int, strategy *service.StrategyService) *WorkerPool {
 	return &WorkerPool{
 		workers:  workers,
 		jobs:     make(chan string, 100),
-		results:  make(chan *model.Signal, 100),
+		results:  make(chan ScanResult, 100),
 		strategy: strategy,
 	}
 }
@@ -42,15 +48,22 @@ func (p *WorkerPool) worker(id int) {
 
 	for symbol := range p.jobs {
 		log.Printf("⏳ [Worker %d] Processing %s...", id, symbol)
-		signal, err := p.strategy.EvaluateSymbol(symbol)
+		signal, price, err := p.strategy.EvaluateSymbol(symbol)
+
 		if err != nil {
 			log.Printf("⚠️  [Worker %d] Error evaluating %s: %v", id, symbol, err)
 			continue
 		}
 
+		// Always report result (for Price monitoring)
+		p.results <- ScanResult{
+			Signal: signal,
+			Symbol: symbol,
+			Price:  price,
+		}
+
 		if signal != nil {
 			log.Printf("📈 [Worker %d] Signal found for %s!", id, symbol)
-			p.results <- signal
 		}
 	}
 	log.Printf("✅ [Worker %d] Completed all jobs", id)
@@ -62,7 +75,8 @@ func (p *WorkerPool) AddJob(symbol string) {
 }
 
 // Wait closes the jobs channel and waits for all workers to finish
-func (p *WorkerPool) Wait() []*model.Signal {
+// Returns potential signals and a map of current prices for all scanned symbols
+func (p *WorkerPool) Wait() ([]*model.Signal, map[string]float64) {
 	log.Printf("⏳ [Worker Pool] Waiting for all workers to complete...")
 	close(p.jobs)
 	p.wg.Wait()
@@ -70,10 +84,17 @@ func (p *WorkerPool) Wait() []*model.Signal {
 
 	// Collect all results
 	signals := make([]*model.Signal, 0)
-	for signal := range p.results {
-		signals = append(signals, signal)
+	prices := make(map[string]float64)
+
+	for res := range p.results {
+		if res.Price > 0 {
+			prices[res.Symbol] = res.Price
+		}
+		if res.Signal != nil {
+			signals = append(signals, res.Signal)
+		}
 	}
 
-	log.Printf("✅ [Worker Pool] All workers completed. Collected %d signals", len(signals))
-	return signals
+	log.Printf("✅ [Worker Pool] All workers completed. Collected %d signals, %d prices", len(signals), len(prices))
+	return signals, prices
 }

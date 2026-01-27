@@ -17,13 +17,14 @@ import (
 )
 
 type TelegramService struct {
-	bot        *tgbotapi.BotAPI
-	chatID     int64
-	collection *mongo.Collection
-	binance    *BinanceService
+	bot           *tgbotapi.BotAPI
+	chatID        int64
+	collection    *mongo.Collection
+	binance       *BinanceService
+	symbolManager *SymbolManager
 }
 
-func NewTelegramService(binanceService *BinanceService) (*TelegramService, error) {
+func NewTelegramService(binanceService *BinanceService, symbolManager *SymbolManager) (*TelegramService, error) {
 	bot, err := tgbotapi.NewBotAPI(config.AppConfig.TelegramBotToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
@@ -40,10 +41,11 @@ func NewTelegramService(binanceService *BinanceService) (*TelegramService, error
 	collection := client.Database("mrcrypto").Collection("signals")
 
 	service := &TelegramService{
-		bot:        bot,
-		chatID:     parseChatID(config.AppConfig.TelegramChatID),
-		collection: collection,
-		binance:    binanceService,
+		bot:           bot,
+		chatID:        parseChatID(config.AppConfig.TelegramChatID),
+		collection:    collection,
+		binance:       binanceService,
+		symbolManager: symbolManager,
 	}
 
 	// Start command handler in background
@@ -103,6 +105,9 @@ func (s *TelegramService) handleCommands() {
 		case "reset":
 			log.Println("📱 /reset command executed")
 			s.handleReset(update.Message)
+		case "symbol":
+			log.Println("📱 /symbol command executed")
+			s.handleSymbol(update.Message)
 		default:
 			// Handle dynamic commands like /status_A1B2C
 			if strings.HasPrefix(command, "status_") {
@@ -113,6 +118,66 @@ func (s *TelegramService) handleCommands() {
 				s.bot.Send(msg)
 			}
 		}
+	}
+}
+
+// handleSymbol manages watchlist commands (add/del/list)
+func (s *TelegramService) handleSymbol(msg *tgbotapi.Message) {
+	parts := strings.Fields(msg.Text)
+	if len(parts) < 2 {
+		s.sendMessage(msg.Chat.ID, `💡 <b>Symbol Management</b>
+Usage:
+• <code>/symbol add BTCUSDT</code> (Add to watchlist)
+• <code>/symbol del BTCUSDT</code> (Remove from watchlist)
+• <code>/symbol list</code> (Show watchlist)`)
+		return
+	}
+
+	action := strings.ToLower(parts[1])
+
+	switch action {
+	case "add":
+		if len(parts) < 3 {
+			s.sendMessage(msg.Chat.ID, "❌ Usage: /symbol add {SYMBOL}")
+			return
+		}
+		symbol := strings.ToUpper(parts[2])
+		if err := s.symbolManager.AddSymbol(symbol); err != nil {
+			s.sendMessage(msg.Chat.ID, fmt.Sprintf("❌ Failed to add symbol: %v", err))
+		} else {
+			s.sendMessage(msg.Chat.ID, fmt.Sprintf("✅ <b>%s</b> added to watchlist.", symbol))
+		}
+
+	case "del":
+		if len(parts) < 3 {
+			s.sendMessage(msg.Chat.ID, "❌ Usage: /symbol del {SYMBOL}")
+			return
+		}
+		symbol := strings.ToUpper(parts[2])
+		if err := s.symbolManager.RemoveSymbol(symbol); err != nil {
+			s.sendMessage(msg.Chat.ID, fmt.Sprintf("❌ Failed to remove symbol: %v", err))
+		} else {
+			s.sendMessage(msg.Chat.ID, fmt.Sprintf("🗑️ <b>%s</b> removed from watchlist.", symbol))
+		}
+
+	case "list":
+		symbols, err := s.symbolManager.GetWatchlist()
+		if err != nil {
+			s.sendMessage(msg.Chat.ID, fmt.Sprintf("❌ Failed to fetch list: %v", err))
+			return
+		}
+
+		if len(symbols) == 0 {
+			s.sendMessage(msg.Chat.ID, "📭 Watchlist is empty.")
+			return
+		}
+
+		message := fmt.Sprintf("📋 <b>Watchlist (%d)</b>\n\n", len(symbols))
+		message += strings.Join(symbols, ", ")
+		s.sendMessage(msg.Chat.ID, message)
+
+	default:
+		s.sendMessage(msg.Chat.ID, "❌ Unknown action. Use add/del/list.")
 	}
 }
 

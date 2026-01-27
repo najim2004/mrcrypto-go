@@ -22,7 +22,7 @@ func main() {
 	symbol := "ETHUSDT"
 	log.Printf("🔍 Evaluating %s...", symbol)
 
-	signal, err := strategyService.EvaluateSymbol(symbol)
+	signal, _, err := strategyService.EvaluateSymbol(symbol)
 	if err != nil {
 		log.Fatalf("❌ Error evaluating symbol: %v", err)
 	}

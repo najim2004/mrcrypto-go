@@ -27,7 +27,7 @@ func NewStrategyService(binance *BinanceService) *StrategyService {
 // ========================================
 
 // EvaluateSymbol analyzes a symbol using professional multi-factor confluence approach
-func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
+func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64, error) {
 	log.Printf("🔄 [Strategy] Evaluating %s...", symbol)
 
 	// ========================================
@@ -37,31 +37,31 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Daily for pivot points
 	klines1d, err := s.binance.GetKlines(symbol, "1d", 10)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch 1d klines: %w", err)
+		return nil, 0, fmt.Errorf("failed to fetch 1d klines: %w", err)
 	}
 
 	// 4H for trend direction and key levels
 	klines4h, err := s.binance.GetKlines(symbol, "4h", 200)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch 4h klines: %w", err)
+		return nil, 0, fmt.Errorf("failed to fetch 4h klines: %w", err)
 	}
 
 	// 1H for confirmation
 	klines1h, err := s.binance.GetKlines(symbol, "1h", 200)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch 1h klines: %w", err)
+		return nil, 0, fmt.Errorf("failed to fetch 1h klines: %w", err)
 	}
 
 	// 15m for alignment
 	klines15m, err := s.binance.GetKlines(symbol, "15m", 200)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch 15m klines: %w", err)
+		return nil, 0, fmt.Errorf("failed to fetch 15m klines: %w", err)
 	}
 
 	// 5m for entry timing
 	klines5m, err := s.binance.GetKlines(symbol, "5m", 200)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch 5m klines: %w", err)
+		return nil, 0, fmt.Errorf("failed to fetch 5m klines: %w", err)
 	}
 
 	// ========================================
@@ -114,7 +114,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Determine trend for Fib calculation
 	ema50_4h := indicator.CalculateEMA(closes4h, 50)
 	if len(ema50_4h) == 0 {
-		return nil, nil
+		return nil, currentPrice, nil
 	}
 	ema50Value := ema50_4h[len(ema50_4h)-1]
 
@@ -154,7 +154,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Validate data
 	if rsi4h == 0 || rsi1h == 0 || adx4h == 0 {
 		log.Printf("⚠️  [Strategy] %s - Insufficient data", symbol)
-		return nil, nil
+		return nil, currentPrice, nil
 	}
 
 	// VWAP & MACD
@@ -210,7 +210,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Skip choppy markets early
 	if regime == model.RegimeChoppy {
 		log.Printf("⏭️  [Strategy] %s - Skipped (choppy ADX < 20)", symbol)
-		return nil, nil
+		return nil, currentPrice, nil
 	}
 
 	// ========================================
@@ -222,7 +222,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	signalDir := determineSignalDirection(regime, currentPrice, ema50Value, rsi4h)
 	if signalDir == "" {
 		log.Printf("⏭️  [Strategy] %s - No clear direction", symbol)
-		return nil, nil
+		return nil, currentPrice, nil
 	}
 
 	// Calculate Score (Max 100)
@@ -241,7 +241,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Minimum score threshold (Strict 70)
 	if score < 70 {
 		log.Printf("⏭️  [Strategy] %s - Score too low (%d < 70)", symbol, score)
-		return nil, nil
+		return nil, currentPrice, nil
 	}
 
 	// ========================================
@@ -256,7 +256,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	if !nearKeyLevel && score < 90 {
 		log.Printf("⏭️  [Strategy] %s - Not near key level (Pivot: %.2f%%, Fib: %.2f%%)",
 			symbol, pivotProximity, fibProximity)
-		return nil, nil
+		return nil, currentPrice, nil
 	}
 
 	// ========================================
@@ -332,7 +332,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 	// Minimum 2:1 R:R required (based on final target)
 	if rrResult.Ratio < 2.0 {
 		log.Printf("⏭️  [Strategy] %s - R:R too low (%.2f < 2.0)", symbol, rrResult.Ratio)
-		return nil, nil
+		return nil, currentPrice, nil
 	}
 
 	// Calculate probability metrics
@@ -444,7 +444,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		symbol, signalDir, signal.ID, score, signalProbability*100, tier, rrResult.Ratio,
 		FormatPrice(currentPrice), FormatPrice(stopLoss), riskPercent)
 
-	return signal, nil
+	return signal, currentPrice, nil
 }
 
 // generateSignalID generates a short 5-character alphanumeric ID
