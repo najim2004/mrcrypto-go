@@ -39,6 +39,7 @@ func formatSignalMessage(signal *model.Signal) string {
 	}
 
 	message := fmt.Sprintf(`%s <b>%s SIGNAL</b> ✅
+🆔 <b>ID:</b> %s
 
 %s | %s (System) | %s (AI)
 
@@ -53,9 +54,12 @@ func formatSignalMessage(signal *model.Signal) string {
 
 📝 <b>AI Analysis:</b>
 %s
+
+⏰ <b>Time:</b> %s
 `,
 		signalEmoji,
 		signal.Type, // SHORT / LONG
+		signal.ID,
 		signal.Symbol,
 		systemTier,
 		aiTier,
@@ -69,6 +73,7 @@ func formatSignalMessage(signal *model.Signal) string {
 		aiScore,
 		systemScore,
 		aiAnalysis,
+		signal.Timestamp.Format("15:04:05, 02 Jan"),
 	)
 
 	return message

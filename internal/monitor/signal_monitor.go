@@ -33,8 +33,15 @@ func (sm *SignalMonitor) MonitorActiveSignals() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Find all active signals
-	cursor, err := sm.collection.Find(ctx, bson.M{"status": "ACTIVE"})
+	// Find all active signals created TODAY
+	// This prevents monitoring stale signals from previous days
+	today := time.Now().Truncate(24 * time.Hour)
+	filter := bson.M{
+		"status":     "ACTIVE",
+		"created_at": bson.M{"$gte": today},
+	}
+
+	cursor, err := sm.collection.Find(ctx, filter)
 	if err != nil {
 		log.Printf("❌ Failed to fetch active signals: %v", err)
 		return
@@ -61,8 +68,8 @@ func (sm *SignalMonitor) MonitorActiveSignals() {
 
 // checkSignal checks individual signal for TP/SL/Reversal
 func (sm *SignalMonitor) checkSignal(signal *model.Signal) {
-	log.Printf("⏳ [Monitor] Checking %s (Type: %s, Entry: %s)...",
-		signal.Symbol, signal.Type, formatPrice(signal.EntryPrice))
+	log.Printf("⏳ [Monitor] Checking %s (ID: %s, Type: %s, Entry: %s)...",
+		signal.Symbol, signal.ID, signal.Type, formatPrice(signal.EntryPrice))
 	// Fetch current price from Binance
 	klines, err := sm.binance.GetKlines(signal.Symbol, "1m", 1)
 	if err != nil {
@@ -88,22 +95,27 @@ func (sm *SignalMonitor) checkSignal(signal *model.Signal) {
 func (sm *SignalMonitor) checkLongSignal(signal *model.Signal, currentPrice float64) {
 	// Take Profit Hit
 	if currentPrice >= signal.TakeProfit {
-		pnl := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
-		sm.closeSignal(signal, "TP_HIT", currentPrice, pnl)
-		sm.sendTPAlert(signal, currentPrice, pnl)
+		if !signal.TPAlertSent {
+			pnl := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
+			sm.closeSignal(signal, "TP_HIT", currentPrice, pnl)
+			// Pass update flag to strictly track alert status (although clodeSignal handles status)
+			sm.sendTPAlert(signal, currentPrice, pnl)
+		}
 		return
 	}
 
 	// Stop Loss Hit
 	if currentPrice <= signal.StopLoss {
-		pnl := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
-		sm.closeSignal(signal, "SL_HIT", currentPrice, pnl)
-		sm.sendSLAlert(signal, currentPrice, pnl)
+		if !signal.SLAlertSent {
+			pnl := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
+			sm.closeSignal(signal, "SL_HIT", currentPrice, pnl)
+			sm.sendSLAlert(signal, currentPrice, pnl)
+		}
 		return
 	}
 
 	// Quick Reversal Detection (price dropped 1% from entry within 5 min)
-	if signal.Timestamp.Add(5 * time.Minute).After(time.Now()) {
+	if !signal.ReversalAlertSent && signal.Timestamp.Add(5*time.Minute).After(time.Now()) {
 		drop := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
 		if drop >= 1.0 && drop < 2.0 { // Between 1-2% (before SL)
 			sm.sendReversalWarning(signal, currentPrice, drop)
@@ -111,9 +123,11 @@ func (sm *SignalMonitor) checkLongSignal(signal *model.Signal, currentPrice floa
 	}
 
 	// Trailing Stop Recommendation (price up 3%+)
-	profit := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
-	if profit >= 3.0 && profit < 6.0 {
-		sm.sendTrailingStopSuggestion(signal, currentPrice, profit)
+	if !signal.TrailingAlertSent {
+		profit := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
+		if profit >= 3.0 && profit < 6.0 {
+			sm.sendTrailingStopSuggestion(signal, currentPrice, profit)
+		}
 	}
 }
 
@@ -121,22 +135,26 @@ func (sm *SignalMonitor) checkLongSignal(signal *model.Signal, currentPrice floa
 func (sm *SignalMonitor) checkShortSignal(signal *model.Signal, currentPrice float64) {
 	// Take Profit Hit (price goes down)
 	if currentPrice <= signal.TakeProfit {
-		pnl := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
-		sm.closeSignal(signal, "TP_HIT", currentPrice, pnl)
-		sm.sendTPAlert(signal, currentPrice, pnl)
+		if !signal.TPAlertSent {
+			pnl := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
+			sm.closeSignal(signal, "TP_HIT", currentPrice, pnl)
+			sm.sendTPAlert(signal, currentPrice, pnl)
+		}
 		return
 	}
 
 	// Stop Loss Hit (price goes up)
 	if currentPrice >= signal.StopLoss {
-		pnl := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
-		sm.closeSignal(signal, "SL_HIT", currentPrice, pnl)
-		sm.sendSLAlert(signal, currentPrice, pnl)
+		if !signal.SLAlertSent {
+			pnl := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
+			sm.closeSignal(signal, "SL_HIT", currentPrice, pnl)
+			sm.sendSLAlert(signal, currentPrice, pnl)
+		}
 		return
 	}
 
 	// Quick Reversal Detection
-	if signal.Timestamp.Add(5 * time.Minute).After(time.Now()) {
+	if !signal.ReversalAlertSent && signal.Timestamp.Add(5*time.Minute).After(time.Now()) {
 		rise := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
 		if rise >= 1.0 && rise < 2.0 {
 			sm.sendReversalWarning(signal, currentPrice, rise)
@@ -144,9 +162,11 @@ func (sm *SignalMonitor) checkShortSignal(signal *model.Signal, currentPrice flo
 	}
 
 	// Trailing Stop Recommendation
-	profit := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
-	if profit >= 3.0 && profit < 6.0 {
-		sm.sendTrailingStopSuggestion(signal, currentPrice, profit)
+	if !signal.TrailingAlertSent {
+		profit := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
+		if profit >= 3.0 && profit < 6.0 {
+			sm.sendTrailingStopSuggestion(signal, currentPrice, profit)
+		}
 	}
 }
 
@@ -156,27 +176,61 @@ func (sm *SignalMonitor) closeSignal(signal *model.Signal, reason string, exitPr
 	defer cancel()
 
 	now := time.Now()
+	// Set AlertSent flags to true upon close to be safe
 	update := bson.M{
 		"$set": bson.M{
-			"status":       "CLOSED",
-			"close_reason": reason,
-			"closed_at":    now,
-			"pnl":          pnl,
+			"status":        "CLOSED",
+			"close_reason":  reason,
+			"closed_at":     now,
+			"pnl":           pnl,
+			"tp_alert_sent": reason == "TP_HIT",
+			"sl_alert_sent": reason == "SL_HIT",
 		},
 	}
 
 	_, err := sm.collection.UpdateOne(
 		ctx,
-		bson.M{"symbol": signal.Symbol, "status": "ACTIVE", "timestamp": signal.Timestamp},
+		bson.M{"_id": signal.ID}, // Use ID if available, else standard filter
 		update,
 	)
-
-	if err != nil {
-		log.Printf("❌ Failed to close signal %s: %v", signal.Symbol, err)
-		return
+	// Fallback to symbol+timestamp if ID update fails (legacy support during transition)
+	if err != nil || signal.ID == "" {
+		_, _ = sm.collection.UpdateOne(
+			ctx,
+			bson.M{"symbol": signal.Symbol, "status": "ACTIVE", "timestamp": signal.Timestamp},
+			update,
+		)
 	}
 
 	log.Printf("🔒 Closed %s signal: %s (PnL: %.2f%%)", signal.Symbol, reason, pnl)
+}
+
+// updateAlertStatus updates the alert status flags in MongoDB
+func (sm *SignalMonitor) updateAlertStatus(signal *model.Signal, update bson.M) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Add LastAlertTime to update
+	if set, ok := update["$set"].(bson.M); ok {
+		set["last_alert_time"] = time.Now()
+	} else {
+		update["$set"] = bson.M{"last_alert_time": time.Now()}
+	}
+
+	// Try ID first
+	if signal.ID != "" {
+		_, err := sm.collection.UpdateOne(ctx, bson.M{"id": signal.ID}, update)
+		if err == nil {
+			return
+		}
+	}
+
+	// Fallback
+	sm.collection.UpdateOne(
+		ctx,
+		bson.M{"symbol": signal.Symbol, "status": "ACTIVE", "timestamp": signal.Timestamp},
+		update,
+	)
 }
 
 // sendTPAlert sends Take Profit hit notification in Bangla
@@ -187,6 +241,7 @@ func (sm *SignalMonitor) sendTPAlert(signal *model.Signal, exitPrice, pnl float6
 	}
 
 	message := fmt.Sprintf(`%s <b>টেক প্রফিট হিট!</b>
+%s
 
 <b>সিম্বল:</b> %s
 <b>টাইপ:</b> %s
@@ -202,6 +257,7 @@ func (sm *SignalMonitor) sendTPAlert(signal *model.Signal, exitPrice, pnl float6
 এখন ৫০%% বিক্রি করুন এবং বাকি ৫০%% trailing stop দিয়ে রাখুন।
 `,
 		emoji,
+		formatID(signal.ID),
 		signal.Symbol,
 		signal.Type,
 		signal.Tier,
@@ -212,11 +268,14 @@ func (sm *SignalMonitor) sendTPAlert(signal *model.Signal, exitPrice, pnl float6
 	)
 
 	sm.telegram.SendMessage(message)
+	// Mark local object too just in case reused in same cycle
+	signal.TPAlertSent = true
 }
 
 // sendSLAlert sends Stop Loss hit notification in Bangla
 func (sm *SignalMonitor) sendSLAlert(signal *model.Signal, exitPrice, pnl float64) {
 	message := fmt.Sprintf(`🛑 <b>স্টপ লস হিট!</b>
+%s
 
 <b>সিম্বল:</b> %s
 <b>টাইপ:</b> %s
@@ -231,6 +290,7 @@ func (sm *SignalMonitor) sendSLAlert(signal *model.Signal, exitPrice, pnl float6
 💡 <b>শিক্ষা:</b> স্টপ লস মেনে চলাই স্মার্ট ট্রেডিং।
 পরবর্তী সিগন্যালের জন্য অপেক্ষা করুন।
 `,
+		formatID(signal.ID),
 		signal.Symbol,
 		signal.Type,
 		signal.Tier,
@@ -241,11 +301,13 @@ func (sm *SignalMonitor) sendSLAlert(signal *model.Signal, exitPrice, pnl float6
 	)
 
 	sm.telegram.SendMessage(message)
+	signal.SLAlertSent = true
 }
 
 // sendReversalWarning sends quick reversal warning
 func (sm *SignalMonitor) sendReversalWarning(signal *model.Signal, currentPrice, movePercent float64) {
 	message := fmt.Sprintf(`⚠️ <b>সতর্কতা: এন্ট্রি রিভার্স হচ্ছে!</b>
+%s
 
 <b>সিম্বল:</b> %s
 <b>এন্ট্রি প্রাইস:</b> %s
@@ -259,6 +321,7 @@ func (sm *SignalMonitor) sendReversalWarning(signal *model.Signal, currentPrice,
 
 <b>স্টপ লস:</b> %s
 `,
+		formatID(signal.ID),
 		signal.Symbol,
 		formatPrice(signal.EntryPrice),
 		formatPrice(currentPrice),
@@ -268,6 +331,10 @@ func (sm *SignalMonitor) sendReversalWarning(signal *model.Signal, currentPrice,
 
 	sm.telegram.SendMessage(message)
 	log.Printf("⚠️  Reversal warning sent for %s (%.2f%%)", signal.Symbol, movePercent)
+
+	// Persist alert state
+	sm.updateAlertStatus(signal, bson.M{"$set": bson.M{"reversal_alert_sent": true}})
+	signal.ReversalAlertSent = true
 }
 
 // sendTrailingStopSuggestion sends trailing stop suggestion
@@ -278,6 +345,7 @@ func (sm *SignalMonitor) sendTrailingStopSuggestion(signal *model.Signal, curren
 	}
 
 	message := fmt.Sprintf(`📊 <b>ট্রেইলিং স্টপ সাজেশন</b>
+%s
 
 <b>সিম্বল:</b> %s
 <b>বর্তমান প্রফিট:</b> +%.2f%%
@@ -289,6 +357,7 @@ func (sm *SignalMonitor) sendTrailingStopSuggestion(signal *model.Signal, curren
 
 এভাবে প্রফিট protect করুন!
 `,
+		formatID(signal.ID),
 		signal.Symbol,
 		profit,
 		formatPrice(signal.StopLoss),
@@ -297,6 +366,17 @@ func (sm *SignalMonitor) sendTrailingStopSuggestion(signal *model.Signal, curren
 
 	sm.telegram.SendMessage(message)
 	log.Printf("💡 Trailing stop suggestion sent for %s (+%.2f%%)", signal.Symbol, profit)
+
+	// Persist alert state
+	sm.updateAlertStatus(signal, bson.M{"$set": bson.M{"trailing_alert_sent": true}})
+	signal.TrailingAlertSent = true
+}
+
+func formatID(id string) string {
+	if id == "" {
+		return ""
+	}
+	return fmt.Sprintf("🆔 <b>ID:</b> %s", id)
 }
 
 func formatPrice(price float64) string {

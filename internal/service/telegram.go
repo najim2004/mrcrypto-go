@@ -78,7 +78,7 @@ func (s *TelegramService) handleCommands() {
 			s.handleStart(chatID)
 		case "status":
 			log.Println("📱 /status command executed")
-			s.handleStatus(chatID)
+			s.handleStatusCheck(update.Message)
 		case "today":
 			log.Println("📱 /today command executed")
 			s.handleToday(chatID)
@@ -100,11 +100,45 @@ func (s *TelegramService) handleCommands() {
 		case "price":
 			log.Println("📱 /price command executed")
 			s.handlePrice(update.Message)
+		case "reset":
+			log.Println("📱 /reset command executed")
+			s.handleReset(update.Message)
 		default:
-			msg := tgbotapi.NewMessage(chatID, "Unknown command. Use /help to see available commands.")
-			s.bot.Send(msg)
+			// Handle dynamic commands like /status_A1B2C
+			if strings.HasPrefix(command, "status_") {
+				log.Printf("📱 %s command executed", command)
+				s.handleStatusCheck(update.Message)
+			} else {
+				msg := tgbotapi.NewMessage(chatID, "Unknown command. Use /help to see available commands.")
+				s.bot.Send(msg)
+			}
 		}
 	}
+}
+
+// handleReset deletes all signals from the database
+func (s *TelegramService) handleReset(msg *tgbotapi.Message) {
+	// Security check: Only allow admin to reset (optional, but good practice)
+	// For now, allowing any user as per requirement "all signal clear hoye jabe"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Delete all documents in collection
+	result, err := s.collection.DeleteMany(ctx, bson.M{})
+	if err != nil {
+		s.sendMessage(msg.Chat.ID, fmt.Sprintf("❌ Failed to reset database: %v", err))
+		return
+	}
+
+	confirmation := fmt.Sprintf(`⚠️ <b>SYSTEM RESET</b>
+
+🗑️ <b>Deleted:</b> %d signals
+✅ Database is now empty.
+🔄 Monitoring will start fresh.`, result.DeletedCount)
+
+	s.sendMessage(msg.Chat.ID, confirmation)
+	log.Printf("🗑️ [Telegram] System reset triggered by user. Deleted %d signals.", result.DeletedCount)
 }
 
 // handleStart sends welcome message
@@ -172,23 +206,146 @@ func (s *TelegramService) handleToday(chatID int64) {
 	}
 
 	if len(signals) == 0 {
-		msg := tgbotapi.NewMessage(chatID, "📅 আজ এখনো কোন signal generate হয়নি।")
+		msg := tgbotapi.NewMessage(chatID, "📅 আজ এখন পর্যন্ত কোন signal generate হয়নি।")
 		s.bot.Send(msg)
 		return
 	}
 
-	message := fmt.Sprintf("📅 *Today's Signals (%d)*\n\n", len(signals))
-	for idx, sig := range signals {
-		message += fmt.Sprintf("%d. %s %s\n", idx+1, sig.Type, sig.Symbol)
-		message += fmt.Sprintf("   Entry: %s\n", FormatPrice(sig.EntryPrice))
-		message += fmt.Sprintf("   AI Score: %d/100\n", sig.AIScore)
-		message += fmt.Sprintf("   Confidence: %.0f%%\n", sig.ConfidenceScore*100)
-		message += fmt.Sprintf("   Tier: %s\n\n", sig.Tier)
+	message := fmt.Sprintf("📅 <b>Today's Signals (%d)</b>\n\n", len(signals))
+	for _, sig := range signals {
+		statusEmoji := "🟢"
+		if sig.Status == "CLOSED" {
+			if sig.PnL > 0 {
+				statusEmoji = "✅"
+			} else {
+				statusEmoji = "❌"
+			}
+		} else if sig.PnL < 0 {
+			statusEmoji = "🔻"
+		}
+
+		// Use /status_ID format for one-click check
+		cmd := fmt.Sprintf("/status_%s", sig.ID)
+		if sig.ID == "" {
+			cmd = "/status" // Fallback
+		}
+
+		message += fmt.Sprintf("%s %s <b>%s</b> %s (PnL: %s%.2f%%)\n",
+			cmd, statusEmoji, sig.Symbol, sig.Type, getPnLSign(sig.PnL), sig.PnL)
 	}
 
+	message += "\nℹ️ Click the command /status_ID to view details."
+
 	msg := tgbotapi.NewMessage(chatID, message)
-	msg.ParseMode = "Markdown"
+	msg.ParseMode = "HTML"
 	s.bot.Send(msg)
+}
+
+// handleStatusCheck checks status of a specific signal by ID
+func (s *TelegramService) handleStatusCheck(msg *tgbotapi.Message) {
+	// Support two formats:
+	// 1. /status A1B2C (Space separated)
+	// 2. /status_A1B2C (Underscore equivalent for clickable links)
+
+	text := strings.TrimSpace(msg.Text)
+	var signalID string
+
+	// Check format 2: /status_ID
+	if strings.Contains(text, "/status_") {
+		parts := strings.Split(text, "/status_")
+		if len(parts) > 1 {
+			// Take the first part after status_, and trim any extra spaces/chars if needed
+			// Usually valid ID is directly after
+			signalID = strings.Split(parts[1], " ")[0]
+		}
+	} else {
+		// Check format 1: /status ID
+		parts := strings.Fields(text)
+		if len(parts) >= 2 {
+			signalID = parts[1]
+		}
+	}
+
+	signalID = strings.ToUpper(strings.TrimSpace(signalID))
+
+	if signalID == "" {
+		s.sendMessage(msg.Chat.ID, `💡 <b>Usage:</b> 
+• <code>/status {ID}</code>
+• or click <code>/status_ID</code>
+
+Example: /status A1B2C`)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var signal model.Signal
+	// Try finding by ID first
+	err := s.collection.FindOne(ctx, bson.M{"id": signalID}).Decode(&signal)
+	if err != nil {
+		s.sendMessage(msg.Chat.ID, fmt.Sprintf("❌ Signal ID <b>%s</b> not found.", signalID))
+		return
+	}
+
+	// Fetch current price for live update
+	currentPrice := 0.0
+	klines, err := s.binance.GetKlines(signal.Symbol, "1m", 1)
+	if err == nil && len(klines) > 0 {
+		currentPrice = klines[0].Close
+	}
+
+	// Calculate live PnL if active
+	livePnL := signal.PnL
+	if signal.Status == "ACTIVE" && currentPrice > 0 {
+		if signal.Type == model.SignalTypeLong {
+			livePnL = ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
+		} else {
+			livePnL = ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
+		}
+	}
+
+	// Base Message (Original Signal Format)
+	baseMessage := formatSignalMessage(&signal)
+
+	// Status Append
+	statusEmoji := "🟢"
+	if signal.Status == "CLOSED" {
+		statusEmoji = "🔴"
+	}
+
+	pnlEmoji := "😐"
+	if livePnL > 0 {
+		pnlEmoji = "🤑"
+	} else if livePnL < 0 {
+		pnlEmoji = "😰"
+	}
+
+	statusSection := fmt.Sprintf(`
+➖➖➖➖➖➖➖➖➖➖
+📊 <b>LIVE STATUS</b>
+
+<b>Current Price:</b> %s
+<b>Status:</b> %s %s
+<b>PnL:</b> %s%.2f%% %s
+<b>Time:</b> %s
+
+`,
+		FormatPrice(currentPrice),
+		statusEmoji, signal.Status,
+		getPnLSign(livePnL), livePnL, pnlEmoji,
+		time.Now().Format("15:04:05, 02 Jan"),
+	)
+
+	if signal.Status == "CLOSED" {
+		statusSection += fmt.Sprintf("<b>Closed Reason:</b> %s\n", signal.CloseReason)
+	}
+
+	finalMessage := baseMessage + statusSection
+
+	response := tgbotapi.NewMessage(msg.Chat.ID, finalMessage)
+	response.ParseMode = "HTML"
+	s.bot.Send(response)
 }
 
 func (s *TelegramService) handleHelp(chatID int64) {

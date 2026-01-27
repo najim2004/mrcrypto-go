@@ -158,8 +158,10 @@ func (l *Loader) poll() {
 		signal.AITier = result.Tier
 		signal.AIReason = result.Reason
 
-		if result.Score < 70 {
-			log.Printf("❌ %s - AI score too low: %d/100", signal.Symbol, result.Score)
+		// Strict Score Filtering (User Request: Both > 70)
+		if result.Score <= 70 || signal.ConfluenceScore <= 70 {
+			log.Printf("❌ %s - Scores too low (AI: %d, System: %d). Both must be > 70.",
+				signal.Symbol, result.Score, signal.ConfluenceScore)
 			continue
 		}
 

@@ -103,6 +103,9 @@ type Signal struct {
 	AITier           string           `json:"ai_tier" bson:"ai_tier"`             // Standard, Premium, or Reject
 	AIReason         string           `json:"ai_reason" bson:"ai_reason"`
 
+	// Identity
+	ID string `json:"id" bson:"id"` // Short 5-char unique ID
+
 	// Probability Fields
 	ConfidenceScore  float64 `json:"confidence_score" bson:"confidence_score"`       // 0.0 - 1.0 probability of success
 	ConfluenceScore  int     `json:"confluence_score" bson:"confluence_score"`       // 0-100 confluence points
@@ -112,6 +115,13 @@ type Signal struct {
 	TP1Percent       float64 `json:"tp1_percent" bson:"tp1_percent"`                 // % distance to TP1
 	TP2Percent       float64 `json:"tp2_percent" bson:"tp2_percent"`                 // % distance to TP2
 	NearestLevelDist float64 `json:"nearest_level_dist" bson:"nearest_level_dist"`   // % distance to nearest key level
+
+	// Monitoring State
+	TPAlertSent       bool      `json:"tp_alert_sent" bson:"tp_alert_sent"`
+	SLAlertSent       bool      `json:"sl_alert_sent" bson:"sl_alert_sent"`
+	ReversalAlertSent bool      `json:"reversal_alert_sent" bson:"reversal_alert_sent"`
+	TrailingAlertSent bool      `json:"trailing_alert_sent" bson:"trailing_alert_sent"`
+	LastAlertTime     time.Time `json:"last_alert_time" bson:"last_alert_time"`
 
 	Status      string     `json:"status" bson:"status"`                       // ACTIVE, CLOSED
 	CloseReason string     `json:"close_reason,omitempty" bson:"close_reason"` // TP_HIT, SL_HIT, MANUAL, REVERSED

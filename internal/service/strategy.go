@@ -437,13 +437,32 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, error) {
 		// Status
 		Status:    "ACTIVE",
 		Timestamp: time.Now(),
+		ID:        generateSignalID(), // Generate unique simple ID
 	}
 
-	log.Printf("✨ [Strategy] %s - %s signal! Score: %d (%.0f%% prob), Tier: %s, R:R: %.2f, Entry: %s, SL: %s (%.2f%%)",
-		symbol, signalDir, score, signalProbability*100, tier, rrResult.Ratio,
+	log.Printf("✨ [Strategy] %s - %s signal! ID: %s, Score: %d (%.0f%% prob), Tier: %s, R:R: %.2f, Entry: %s, SL: %s (%.2f%%)",
+		symbol, signalDir, signal.ID, score, signalProbability*100, tier, rrResult.Ratio,
 		FormatPrice(currentPrice), FormatPrice(stopLoss), riskPercent)
 
 	return signal, nil
+}
+
+// generateSignalID generates a short 5-character alphanumeric ID
+func generateSignalID() string {
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 5)
+	// Use time as seed part to ensure some level of uniqueness
+	// Note: In production, consider collision checks, but for <100 signals/day this is fine
+	seed := time.Now().UnixNano()
+	for i := range b {
+		b[i] = charset[seed%int64(len(charset))]
+		seed /= int64(len(charset))
+		// Add some randomness if seed depletes (simple LCG or similar could be better, but this suffices for simple ID)
+		if seed < 10 {
+			seed = time.Now().UnixNano() + int64(i*100)
+		}
+	}
+	return string(b)
 }
 
 // detectRegimePro uses multi-timeframe ADX for better regime detection

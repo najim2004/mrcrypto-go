@@ -310,40 +310,75 @@ func generateSignalPrompt(signal *model.Signal) string {
 	}
 
 	return fmt.Sprintf(`
-━━━━━━━━━━ SIGNAL %s ━━━━━━━━━━
-📌 Symbol: %s | Direction: %s | Tier: %s | Regime: %s (Market Cycle)
+━━━━━━━━━━ SIGNAL CANDIDATE: %s ━━━━━━━━━━
+📌 **BASIC INFO:**
+- **Symbol:** %s
+- **Signal Type:** %s (Proposed Direction)
+- **Strategy Tier:** %s
+- **Market Regime:** %s (Context: TRENDING_UP/DOWN favors trend following, RANGING/CHOPPY requires caution)
 
-💰 RISK & REWARD (Position Management):
-- Entry Price: %s (Current Market Level)
-- Stop Loss: %s (Exit if hit, Risk: %.2f%%)
-- Take Profit: %s (Target exit, Reward: %.2f%%)
-- R:R Ratio: %.2f (Reward-to-Risk)
-- Break-Even Win Rate: %.2f%% (Statistically required)
-- Rec. Position Size: %.2f%% (Kelly Criterion allocation)
+💰 **RISK/REWARD & MONEY MANAGEMENT:**
+*Why this matters: A good trade must have high R:R and controlled risk.*
+- **Entry Price:** %s
+- **Stop Loss:** %s (Distance: %.2f%%)
+- **Take Profit:** %s (Distance: %.2f%%)
+- **R:R Ratio:** %.2f (MUST be > 2.0 for validity)
+- **Break-Even Win Rate:** %.2f%% (Win rate needed to not lose money)
+- **Kelly Position Size:** %.2f%% (Aggressive sizing based on probability)
 
-📊 TECHNICAL INDICATORS (Momentum & Trend):
-- RSI (4H/1H/15M/5M): %.1f/%.1f/%.1f/%.1f (Strength: >70 Overbought, <30 Oversold)
-- ADX (4H/1H/15M): %.1f/%.1f/%.1f (Trend Intensity: >25 Strong)
-- MACD Histogram: %.6f (Momentum Direction)
-- Volume Ratio: %.2fx (Relative volume vs Average)
-- Order Flow: %.2f (Net buying/selling pressure)
+📊 **MOMENTUM & TREND (The "Engine"):**
+*Interpretation: Aligning momentum across timeframes increases success rate.*
+- **RSI (Relative Strength Index):**
+  - 4H: %.1f | 1H: %.1f | 15m: %.1f | 5m: %.1f
+  - *Guide: >70 Overbought (Bearish context), <30 Oversold (Bullish context). 45-55 is neutral.*
+- **Stochastic RSI (15m):** %.1f (K-Line)
+  - *Guide: >80 is Overbought, <20 is Oversold.*
+- **ADX (Trend Strength):**
+  - 4H: %.1f | 1H: %.1f | 15m: %.1f
+  - *Guide: >25 indicates a STRONG trend. <20 indicates weak/choppy market.*
+- **MACD Histogram (5m):** %.6f
+  - *Guide: Positive = Bullish momentum, Negative = Bearish momentum.*
+- **Trend State:** %s (e.g., Golden Cross = Bullish, Death Cross = Bearish)
 
-🔬 ADVANCED ANALYSIS (Professional Tools):
-- Candlestick Pattern: %s (Price Action)
-- Divergence: %s (Reversal Signal)
-- Liquidity Sweep: %s (Smart Money Stop Hunt)
-- Trend State: %s (MA Crossover)
-- Volatility (ATR): %.4f
-- Stochastic RSI: %.1f (K-Line)
+🌊 **VOLUME & FLOW (The "Fuel"):**
+*Interpretation: Price moves without volume are often fake-outs.*
+- **Volume Ratio:** %.2fx (Current vs Avg)
+  - *Guide: >1.5x confirms breakouts/moves. <1.0x suggests weak participation.*
+- **Order Flow Delta:** %.2f
+  - *Guide: Positive = Aggressive Buying, Negative = Aggressive Selling.*
 
-🎯 LEVELS & MARKET STRUCTURE (SMC):
-- Pivot Levels: Pivot: %s | S1: %s | R1: %s (Support/Resistance)
-- Nearest Pivot: %s (Price distance: %.2f%%)
-- Fibonacci: 50.0%%: %s | 61.8%%: %s | Nearest: %s (Retracement zones)
-- BTC Trend: %s (Overall market correlation)
-- Smart Money: OB: %s (Order Block) | FVG: %s (Fair Value Gap)
-- Volume Profile: POC: %s (Dist: %.2f%%) (Point of Control)
-- System Confluence: %d/100 | Confidence: %.1f%% (Internal probability)
+🔭 **MARKET STRUCTURE & LEVELS (The "Map"):**
+*Interpretation: Price reacts at these key psychological levels.*
+- **Pivot Points:** Pivot: %s | S1: %s | R1: %s
+- **Nearest Pivot:** %s is %.2f%% away
+- **Fibonacci Retracement:** 50%%: %s | 61.8%%: %s | Nearest: %s
+- **Nearest Level Proximity:** %.2f%% (Closer to level = Better entry)
+
+🧠 **SMART MONEY CONCEPTS (SMC):**
+*Interpretation: Institutional footprints.*
+- **Order Block (OB):** %s (Price is inside/near a bank trading zone?)
+- **Fair Value Gap (FVG):** %s (Imbalance area acting as magnet?)
+- **Liquidity Sweep:** %s (Has a recent high/low been raided for stop losses?)
+- **POC (Volume Profile):** %s (Distance: %.2f%%)
+  - *Guide: Point of Control is the fair price. Price often reverts to it.*
+- **BTC Correlation:** %s (Trading against BTC trend is risky)
+
+🔬 **PATTERN ANALYSIS:**
+- **Candlestick Pattern:** %s (Immediate price action trigger)
+- **Divergence:** %s (RSI making Highs while Price makes Lows? Reversal signal)
+
+📈 **INTERNAL SYSTEM SCORE:**
+- **Confluence Score:** %d/100 (Sum of all technical factors)
+- **Internal Confidence:** %.1f%%
+
+---
+**YOUR TASK:**
+Analyze the data above. Does the narrative make sense?
+- If Trend is UP but RSI is Overbought (4H), is it a pullback or top?
+- If Volume is low (Ratio < 1), is the move sustainable?
+- Is the R:R actually worth the risk given the Pivot/Resistance levels?
+
+Provide your expert verdict.
 `,
 		signal.Symbol,
 		signal.Symbol,
@@ -362,20 +397,14 @@ func generateSignalPrompt(signal *model.Signal) string {
 		signal.TechnicalContext.RSI1h,
 		signal.TechnicalContext.RSI15m,
 		signal.TechnicalContext.RSI5m,
+		signal.TechnicalContext.StochRSI,
 		signal.TechnicalContext.ADX4h,
 		signal.TechnicalContext.ADX1h,
 		signal.TechnicalContext.ADX15m,
 		signal.TechnicalContext.Histogram,
+		signal.TechnicalContext.TrendState,
 		volRatio,
 		signal.TechnicalContext.OrderFlowDelta,
-		// Advanced Args
-		signal.TechnicalContext.CandlestickPattern,
-		signal.TechnicalContext.Divergence,
-		signal.TechnicalContext.LiquiditySweep,
-		signal.TechnicalContext.TrendState,
-		signal.TechnicalContext.ATR,
-		signal.TechnicalContext.StochRSI,
-		// SMC & Levels
 		FormatPrice(signal.TechnicalContext.PivotPoint),
 		FormatPrice(signal.TechnicalContext.PivotS1),
 		FormatPrice(signal.TechnicalContext.PivotR1),
@@ -384,11 +413,15 @@ func generateSignalPrompt(signal *model.Signal) string {
 		FormatPrice(signal.TechnicalContext.Fib500),
 		FormatPrice(signal.TechnicalContext.Fib618),
 		signal.TechnicalContext.NearestFib,
-		signal.TechnicalContext.BTCCorrelation,
+		signal.NearestLevelDist,
 		signal.TechnicalContext.OBType,
 		signal.TechnicalContext.FVGType,
+		signal.TechnicalContext.LiquiditySweep,
 		FormatPrice(signal.TechnicalContext.POC),
 		signal.TechnicalContext.POCDistance,
+		signal.TechnicalContext.BTCCorrelation,
+		signal.TechnicalContext.CandlestickPattern,
+		signal.TechnicalContext.Divergence,
 		signal.ConfluenceScore,
 		signal.ConfidenceScore*100,
 	)
