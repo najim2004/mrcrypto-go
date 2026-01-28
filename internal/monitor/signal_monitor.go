@@ -212,21 +212,31 @@ func (sm *SignalMonitor) closeSignal(signal *model.Signal, reason string, exitPr
 		},
 	}
 
-	_, err := sm.collection.UpdateOne(
-		ctx,
-		bson.M{"_id": signal.ID}, // Use ID if available, else standard filter
-		update,
-	)
-	// Fallback to symbol+timestamp if ID update fails (legacy support during transition)
-	if err != nil || signal.ID == "" {
-		_, _ = sm.collection.UpdateOne(
+	var updateErr error
+
+	// Try using custom "id" field first (NOT MongoDB's _id which is ObjectId)
+	if signal.ID != "" {
+		_, updateErr = sm.collection.UpdateOne(
+			ctx,
+			bson.M{"id": signal.ID}, // FIXED: Use "id" not "_id"
+			update,
+		)
+	}
+
+	// Fallback to symbol+status+timestamp if ID update fails or ID is empty
+	if updateErr != nil || signal.ID == "" {
+		_, updateErr = sm.collection.UpdateOne(
 			ctx,
 			bson.M{"symbol": signal.Symbol, "status": "ACTIVE", "timestamp": signal.Timestamp},
 			update,
 		)
 	}
 
-	log.Printf("🔒 Closed %s signal: %s (PnL: %.2f%%)", signal.Symbol, reason, pnl)
+	if updateErr != nil {
+		log.Printf("⚠️ Failed to close signal %s: %v", signal.Symbol, updateErr)
+	} else {
+		log.Printf("🔒 Closed %s signal: %s (PnL: %.2f%%)", signal.Symbol, reason, pnl)
+	}
 }
 
 // updateAlertStatus updates the alert status flags in MongoDB
