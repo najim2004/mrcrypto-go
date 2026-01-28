@@ -85,9 +85,9 @@ Remember: A wrong signal leads to significant financial loss. Only provide high 
 3. **Key Level:** Is price reacting to a major level?
 4. **Risk/Reward:** Is R:R > 2.0?
 5. **Score & Tier:**
-   - **PREMIUM (90-100):** Perfect setup. Trend aligned, Volume confirmed, Key Level test.
-   - **STANDARD (70-89):** Good setup but maybe 1 factor weak (e.g., weak volume).
-   - **REJECT (<70):** Bad risk/reward, choppy market, or contra-trend.
+   - **PREMIUM (90-100):** Perfect setup. All factors aligned, high confidence.
+   - **STANDARD (80-89):** Good setup with strong confluence but minor weakness.
+   - **REJECT (<80):** Bad risk/reward, weak confluence, choppy market, or contra-trend.
 
 ╔══════════════════════════════════════════════════════════════╗
                     📝 RESPONSE FORMAT
@@ -137,11 +137,11 @@ CRITICAL: The "reason" field MUST be written in BENGALI (Bangla).
 
 			// Normalize Tier
 			tier := strings.ToUpper(aiResult.Tier)
-			if tier != "PREMIUM" && tier != "STANDARD" {
-				// Auto-correct tier based on score if missing
+			if tier != "PREMIUM" && tier != "STANDARD" && tier != "REJECT" {
+				// Auto-correct tier based on score if missing or invalid
 				if aiResult.Score >= 90 {
 					tier = "PREMIUM"
-				} else if aiResult.Score >= 70 {
+				} else if aiResult.Score >= 80 {
 					tier = "STANDARD"
 				} else {
 					tier = "REJECT"
@@ -181,7 +181,7 @@ Explain your decision like a senior mentor teaching a junior trader. You MUST wr
 
 RESPONSE FORMAT:
 Respond only with a JSON array. 
-- "score": 0-100 (90+ = Premium, 70-89 = Standard, <70 = Reject)
+- "score": 0-100 (90+ = Premium, 80-89 = Standard, <80 = Reject)
 - "confidence": 0-100 (Your confidence in this analysis)
 - "tier": "PREMIUM" | "STANDARD" | "REJECT"
 
@@ -277,7 +277,7 @@ SIGNALS TO SCRUTINIZE:
 					if tier != "PREMIUM" && tier != "STANDARD" && tier != "REJECT" {
 						if res.Score >= 90 {
 							tier = "PREMIUM"
-						} else if res.Score >= 70 {
+						} else if res.Score >= 80 {
 							tier = "STANDARD"
 						} else {
 							tier = "REJECT"

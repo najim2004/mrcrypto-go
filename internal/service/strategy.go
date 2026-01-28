@@ -238,9 +238,9 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 
 	log.Printf("📊 [Strategy] %s - Confluence Score: %d/100 (Dir: %s)", symbol, score, signalDir)
 
-	// Minimum score threshold (Strict 70)
-	if score < 70 {
-		log.Printf("⏭️  [Strategy] %s - Score too low (%d < 70)", symbol, score)
+	// Minimum score threshold (Strict 80)
+	if score < 80 {
+		log.Printf("⏭️  [Strategy] %s - Score too low (%d < 80)", symbol, score)
 		return nil, currentPrice, nil
 	}
 
@@ -262,6 +262,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	// ========================================
 	// STEP 7: DETERMINE TIER
 	// ========================================
+	// Tier: 80-89 = STANDARD, 90-100 = PREMIUM
 	tier := model.TierStandard
 	if score >= 90 {
 		tier = model.TierPremium
@@ -274,25 +275,26 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	var stopLoss, takeProfit1, takeProfit2 float64
 
 	// Use percentage-based SL/TP for consistent R:R
-	// SL: 2%
-	// TP1: 3% (1:1.5 R:R) -> Book 50%
-	// TP2: 6% (1:3 R:R) -> Book 50%
-	slPercent := 2.0 / 100.0
-	tp1Percent := 3.0 / 100.0
-	tp2Percent := 6.0 / 100.0
+	// UPDATED: Wider SL to reduce premature SL hits
+	// SL: 3% (was 2%)
+	// TP1: 4.5% (1:1.5 R:R) -> Book 50%
+	// TP2: 9% (1:3 R:R) -> Book 50%
+	slPercent := 3.0 / 100.0
+	tp1Percent := 4.5 / 100.0
+	tp2Percent := 9.0 / 100.0
 
 	// Adjust based on ATR volatility
 	atrPercent := (atr1h / currentPrice) * 100
 	if atrPercent > 3.0 {
-		// High volatility - use wider stops/targets
-		slPercent = 3.0 / 100.0
-		tp1Percent = 4.5 / 100.0
-		tp2Percent = 9.0 / 100.0
+		// High volatility - use even wider stops/targets
+		slPercent = 4.5 / 100.0
+		tp1Percent = 6.75 / 100.0
+		tp2Percent = 13.5 / 100.0
 	} else if atrPercent < 1.0 {
-		// Low volatility - use tighter stops/targets
-		slPercent = 1.5 / 100.0
-		tp1Percent = 2.25 / 100.0
-		tp2Percent = 4.5 / 100.0
+		// Low volatility - slightly tighter but still safe
+		slPercent = 2.5 / 100.0
+		tp1Percent = 3.75 / 100.0
+		tp2Percent = 7.5 / 100.0
 	}
 
 	if signalDir == "LONG" {
