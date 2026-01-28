@@ -176,6 +176,12 @@ func (l *Loader) poll() {
 
 		log.Printf("✅ %s - Valid signal! AI Score: %d/100", signal.Symbol, result.Score)
 
+		// Check for duplicate active signal BEFORE saving
+		if l.database.CheckDuplicateActiveSignal(signal.Symbol, signal.Type) {
+			log.Printf("⏭️  %s %s - Skipped (duplicate active signal exists)", signal.Symbol, signal.Type)
+			continue
+		}
+
 		// Save to database
 		if err := l.database.SaveSignal(signal); err != nil {
 			log.Printf("⚠️  %s - Failed to save signal: %v", signal.Symbol, err)

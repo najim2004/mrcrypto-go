@@ -103,6 +103,31 @@ func (s *DatabaseService) CheckCooldown(symbol string, duration time.Duration) b
 	return false
 }
 
+// CheckDuplicateActiveSignal checks if an active signal already exists for symbol+type
+func (s *DatabaseService) CheckDuplicateActiveSignal(symbol string, signalType model.SignalType) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	filter := bson.M{
+		"symbol": symbol,
+		"type":   signalType,
+		"status": "ACTIVE",
+	}
+
+	count, err := s.collection.CountDocuments(ctx, filter)
+	if err != nil {
+		log.Printf("⚠️  Error checking duplicate for %s %s: %v", symbol, signalType, err)
+		return false
+	}
+
+	if count > 0 {
+		log.Printf("⏭️  %s %s - Active signal already exists (duplicate prevented)", symbol, signalType)
+		return true
+	}
+
+	return false
+}
+
 // Close closes the database connection
 func (s *DatabaseService) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
