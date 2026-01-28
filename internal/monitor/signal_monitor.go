@@ -33,11 +33,23 @@ func (sm *SignalMonitor) CheckActiveSignalsAgainstPrices(prices map[string]float
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Find all active signals created TODAY
+	// Find all active signals created TODAY that haven't had their final alert sent
 	today := time.Now().Truncate(24 * time.Hour)
 	filter := bson.M{
 		"status":     "ACTIVE",
 		"created_at": bson.M{"$gte": today},
+		// Only monitor signals that haven't hit TP or SL yet
+		// This prevents race condition where signal is re-monitored before DB update completes
+		"$and": []bson.M{
+			{"$or": []bson.M{
+				{"sl_alert_sent": bson.M{"$exists": false}},
+				{"sl_alert_sent": false},
+			}},
+			{"$or": []bson.M{
+				{"tp_alert_sent": bson.M{"$exists": false}},
+				{"tp_alert_sent": false},
+			}},
+		},
 	}
 
 	cursor, err := sm.collection.Find(ctx, filter)
@@ -65,6 +77,7 @@ func (sm *SignalMonitor) CheckActiveSignalsAgainstPrices(prices map[string]float
 			sm.checkSignalWithPrice(&signal, price)
 		}
 	}
+
 }
 
 // checkSignalWithPrice checks individual signal using provided price
