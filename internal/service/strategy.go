@@ -87,6 +87,31 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 		}
 	}
 
+	// ========================================
+	// STEP 1.2: SESSION & FUNDING CHECK (NEW)
+	// ========================================
+	sessionInfo := GetCurrentSession()
+	log.Printf("🕐 [Strategy] %s - Session: %s (%s volatility)", symbol, sessionInfo.Name, sessionInfo.Volatility)
+
+	// Skip dead zone signals with penalty
+	sessionScore := GetSessionScore()
+	if sessionInfo.Session == SessionDeadZone {
+		log.Printf("⏭️  [Strategy] %s - Skipped (Dead Zone - low volatility period)", symbol)
+		return nil, 0, nil
+	}
+
+	// Fetch funding rate
+	fundingInfo, _ := GetFundingRate(symbol)
+	var fundingRate float64
+	var fundingSentiment string
+	var fundingWarning string
+	if fundingInfo != nil {
+		fundingRate = fundingInfo.FundingRate
+		fundingSentiment = fundingInfo.Sentiment
+		fundingWarning = fundingInfo.Warning
+		log.Printf("📊 [Strategy] %s - Funding: %.4f%% (%s)", symbol, fundingRate, fundingSentiment)
+	}
+
 	// Extract price arrays
 	closes4h, highs4h, lows4h, _ := extractSeries(klines4h)
 	closes1h, highs1h, lows1h, _ := extractSeries(klines1h)
@@ -94,6 +119,12 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	closes5m, highs5m, lows5m, volumes5m := extractSeries(klines5m)
 
 	currentPrice := closes5m[len(closes5m)-1]
+
+	// ========================================
+	// STEP 1.3: MARKET STRUCTURE ANALYSIS (NEW)
+	// ========================================
+	structureInfo := indicator.AnalyzeMarketStructure(klines1h, 30)
+	log.Printf("📐 [Strategy] %s - Structure: %s", symbol, structureInfo.Structure)
 
 	// ========================================
 	// STEP 2: KEY LEVELS (Before anything else)
@@ -236,7 +267,27 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 		candlestick, divergence, stochK, stochD, liquiditySweep, string(trendState), // New params
 	)
 
-	log.Printf("📊 [Strategy] %s - Confluence Score: %d/100 (Dir: %s)", symbol, score, signalDir)
+	// Add NEW bonuses/penalties from session, funding, structure
+	score += sessionScore // Session bonus/penalty
+
+	// Funding rate adjustment - use already-fetched fundingInfo (NO duplicate API call)
+	fundingScore := CalculateFundingScore(fundingInfo, signalDir)
+	score += fundingScore
+
+	// Market structure alignment
+	structureScore := indicator.GetStructureScore(structureInfo, signalDir)
+	score += structureScore
+
+	// Clamp score to 0-100
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+
+	log.Printf("📊 [Strategy] %s - Final Score: %d/100 (Session: %+d, Funding: %+d, Structure: %+d)",
+		symbol, score, sessionScore, fundingScore, structureScore)
 
 	// Minimum score threshold (Strict 80)
 	if score < 80 {
@@ -364,9 +415,21 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	if inOB {
 		smcOBType = obType
 	}
-	signalType := model.SignalTypeLong
-	if signalDir == "SHORT" {
-		signalType = model.SignalTypeShort
+	// Generate dynamic trading guidance
+	var tradingGuidance string
+	if signalDir == "LONG" {
+		tradingGuidance = fmt.Sprintf("✅ যদি $%.2f break করে: TP1 টার্গেট করুন\n❌ যদি $%.2f break করে: ট্রেড invalid, exit করুন\n📈 Volume বাড়লে: TP2 পর্যন্ত hold করুন", currentPrice*1.005, stopLoss)
+	} else {
+		tradingGuidance = fmt.Sprintf("✅ যদি $%.2f break করে নিচে যায়: TP1 টার্গেট করুন\n❌ যদি $%.2f break করে: ট্রেড invalid, exit করুন\n📉 Volume বাড়লে: TP2 পর্যন্ত hold করুন", currentPrice*0.995, stopLoss)
+	}
+
+	// Combine all warnings
+	allWarnings := ""
+	if sessionInfo.Warning != "" {
+		allWarnings += sessionInfo.Warning + " "
+	}
+	if fundingWarning != "" {
+		allWarnings += fundingWarning
 	}
 
 	techContext := model.TechnicalContext{
@@ -412,6 +475,23 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 		StochRSI:           stochK, // Using K line
 		LiquiditySweep:     liquiditySweep,
 		TrendState:         string(trendState),
+		// NEW: Session & Market Context
+		TradingSession:    string(sessionInfo.Session),
+		SessionVolatility: sessionInfo.Volatility,
+		// NEW: Funding Rate
+		FundingRate:      fundingRate,
+		FundingSentiment: fundingSentiment,
+		// NEW: Market Structure
+		MarketStructure: string(structureInfo.Structure),
+		// NEW: Dynamic Guidance
+		TradingGuidance:   tradingGuidance,
+		RiskWarning:       allWarnings,
+		NewsCheckReminder: true, // Always remind to check news
+	}
+
+	signalType := model.SignalTypeLong
+	if signalDir == "SHORT" {
+		signalType = model.SignalTypeShort
 	}
 
 	signal := &model.Signal{

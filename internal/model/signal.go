@@ -82,6 +82,22 @@ type TechnicalContext struct {
 	StochRSI           float64 `json:"stoch_rsi"`           // Momentum (K)
 	LiquiditySweep     string  `json:"liquidity_sweep"`     // Swing Failure Pattern
 	TrendState         string  `json:"trend_state"`         // Golden Cross, Death Cross
+
+	// NEW: Session & Market Context
+	TradingSession    string `json:"trading_session" bson:"trading_session"`       // ASIA, LONDON, NY, OVERLAP, DEAD_ZONE
+	SessionVolatility string `json:"session_volatility" bson:"session_volatility"` // LOW, MEDIUM, HIGH
+
+	// NEW: Funding Rate
+	FundingRate      float64 `json:"funding_rate" bson:"funding_rate"`           // Current funding rate %
+	FundingSentiment string  `json:"funding_sentiment" bson:"funding_sentiment"` // BULLISH, BEARISH, NEUTRAL, EXTREME
+
+	// NEW: Market Structure
+	MarketStructure string `json:"market_structure" bson:"market_structure"` // BULLISH_BOS, BEARISH_BOS, CHOCH, NEUTRAL
+
+	// NEW: Dynamic Guidance
+	TradingGuidance   string `json:"trading_guidance" bson:"trading_guidance"`       // Dynamic advice
+	RiskWarning       string `json:"risk_warning" bson:"risk_warning"`               // Any warnings
+	NewsCheckReminder bool   `json:"news_check_reminder" bson:"news_check_reminder"` // Remind to check news
 }
 
 // Signal represents a trading signal

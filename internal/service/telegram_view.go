@@ -38,6 +38,38 @@ func formatSignalMessage(signal *model.Signal) string {
 		aiTier = systemTier
 	}
 
+	// Session info with emoji
+	sessionEmoji := "🕐"
+	switch signal.TechnicalContext.TradingSession {
+	case "LONDON_NY_OVERLAP":
+		sessionEmoji = "🔥" // Best time
+	case "LONDON", "NEW_YORK":
+		sessionEmoji = "✅"
+	case "ASIA":
+		sessionEmoji = "🌙"
+	}
+
+	// Funding sentiment emoji
+	fundingEmoji := "⚖️"
+	switch signal.TechnicalContext.FundingSentiment {
+	case "EXTREME_LONG":
+		fundingEmoji = "⚠️🔼"
+	case "EXTREME_SHORT":
+		fundingEmoji = "⚠️🔽"
+	case "BULLISH":
+		fundingEmoji = "🔼"
+	case "BEARISH":
+		fundingEmoji = "🔽"
+	}
+
+	// Structure emoji
+	structureEmoji := "📐"
+	if strings.Contains(signal.TechnicalContext.MarketStructure, "BULLISH") {
+		structureEmoji = "📈"
+	} else if strings.Contains(signal.TechnicalContext.MarketStructure, "BEARISH") {
+		structureEmoji = "📉"
+	}
+
 	message := fmt.Sprintf(`%s <b>%s SIGNAL</b> ✅
 🆔 <b>ID:</b> %s
 
@@ -52,7 +84,26 @@ func formatSignalMessage(signal *model.Signal) string {
 🤖 <b>AI Score:</b> %d/100
 ⚙️ <b>System Score:</b> %d/100
 
-📝 <b>AI Analysis:</b>
+━━━━━━━━━━━━━━━━━━━
+📊 <b>মার্কেট কন্টেক্সট</b>
+━━━━━━━━━━━━━━━━━━━
+%s <b>সেশন:</b> %s (%s volatility)
+%s <b>Funding:</b> %.4f%% (%s)
+%s <b>স্ট্রাকচার:</b> %s
+
+━━━━━━━━━━━━━━━━━━━
+📝 <b>AI বিশ্লেষণ</b>
+━━━━━━━━━━━━━━━━━━━
+%s
+
+━━━━━━━━━━━━━━━━━━━
+🎯 <b>ট্রেডিং গাইড</b>
+━━━━━━━━━━━━━━━━━━━
+%s
+
+⚠️ <b>সতর্কতা:</b>
+• ট্রেড নেওয়ার আগে গুরুত্বপূর্ণ নিউজ চেক করুন
+• CPI, Fed Meeting, Major Protocol Upgrade এড়িয়ে চলুন
 %s
 
 ⏰ <b>Time:</b> %s
@@ -72,7 +123,16 @@ func formatSignalMessage(signal *model.Signal) string {
 		signal.TP2Percent,
 		aiScore,
 		systemScore,
+		// Market Context
+		sessionEmoji, signal.TechnicalContext.TradingSession, signal.TechnicalContext.SessionVolatility,
+		fundingEmoji, signal.TechnicalContext.FundingRate, signal.TechnicalContext.FundingSentiment,
+		structureEmoji, signal.TechnicalContext.MarketStructure,
+		// AI Analysis
 		aiAnalysis,
+		// Trading Guidance
+		signal.TechnicalContext.TradingGuidance,
+		// Risk warning (if any)
+		signal.TechnicalContext.RiskWarning,
 		signal.Timestamp.Format("15:04:05, 02 Jan"),
 	)
 
