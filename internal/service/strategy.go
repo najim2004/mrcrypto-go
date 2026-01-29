@@ -34,32 +34,32 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	// STEP 1: DATA COLLECTION (Higher TF First)
 	// ========================================
 
-	// Daily for pivot points
-	klines1d, err := s.binance.GetKlines(symbol, "1d", 10)
+	// Daily for pivot points (100 candles = ~3 months context)
+	klines1d, err := s.binance.GetKlines(symbol, "1d", 100)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to fetch 1d klines: %w", err)
 	}
 
-	// 4H for trend direction and key levels
-	klines4h, err := s.binance.GetKlines(symbol, "4h", 200)
+	// 4H for trend direction and key levels (500 candles = ~83 days)
+	klines4h, err := s.binance.GetKlines(symbol, "4h", 500)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to fetch 4h klines: %w", err)
 	}
 
-	// 1H for confirmation
-	klines1h, err := s.binance.GetKlines(symbol, "1h", 200)
+	// 1H for confirmation (500 candles = ~20 days)
+	klines1h, err := s.binance.GetKlines(symbol, "1h", 500)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to fetch 1h klines: %w", err)
 	}
 
-	// 15m for alignment
-	klines15m, err := s.binance.GetKlines(symbol, "15m", 200)
+	// 15m for alignment (500 candles = ~5 days)
+	klines15m, err := s.binance.GetKlines(symbol, "15m", 500)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to fetch 15m klines: %w", err)
 	}
 
-	// 5m for entry timing
-	klines5m, err := s.binance.GetKlines(symbol, "5m", 200)
+	// 5m for entry timing (500 candles = ~1.7 days)
+	klines5m, err := s.binance.GetKlines(symbol, "5m", 500)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to fetch 5m klines: %w", err)
 	}
@@ -69,7 +69,7 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	// ========================================
 	var btcTrend string
 	if symbol != "BTCUSDT" {
-		btcKlines4h, err := s.binance.GetKlines("BTCUSDT", "4h", 200)
+		btcKlines4h, err := s.binance.GetKlines("BTCUSDT", "4h", 500)
 		if err == nil {
 			btcCloses, _, _, _ := extractSeries(btcKlines4h)
 			btcEma50 := indicator.CalculateEMA(btcCloses, 50)
