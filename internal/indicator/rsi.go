@@ -8,6 +8,8 @@ func CalculateRSI(closes []float64, period int) []float64 {
 		return []float64{}
 	}
 
+	const epsilon = 1e-10 // Threshold for near-zero values
+
 	rsi := make([]float64, len(closes))
 	gains := make([]float64, len(closes)-1)
 	losses := make([]float64, len(closes)-1)
@@ -34,24 +36,30 @@ func CalculateRSI(closes []float64, period int) []float64 {
 	avgLoss /= float64(period)
 
 	// Calculate RSI for first period
-	if avgLoss == 0 {
+	if avgLoss < epsilon {
 		rsi[period] = 100
 	} else {
 		rs := avgGain / avgLoss
 		rsi[period] = 100 - (100 / (1 + rs))
 	}
 
+	// Clamp to valid range
+	rsi[period] = math.Max(0, math.Min(100, rsi[period]))
+
 	// Calculate subsequent RSI values using smoothed averages
 	for i := period; i < len(gains); i++ {
 		avgGain = (avgGain*float64(period-1) + gains[i]) / float64(period)
 		avgLoss = (avgLoss*float64(period-1) + losses[i]) / float64(period)
 
-		if avgLoss == 0 {
+		if avgLoss < epsilon {
 			rsi[i+1] = 100
 		} else {
 			rs := avgGain / avgLoss
 			rsi[i+1] = 100 - (100 / (1 + rs))
 		}
+
+		// Clamp to valid range
+		rsi[i+1] = math.Max(0, math.Min(100, rsi[i+1]))
 	}
 
 	return rsi

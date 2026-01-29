@@ -117,10 +117,18 @@ func (sm *SignalMonitor) checkSignal(signal *model.Signal) {
 
 // checkLongSignal checks LONG signal conditions
 func (sm *SignalMonitor) checkLongSignal(signal *model.Signal, currentPrice float64) {
+	// Validate entry price to prevent division by zero
+	if signal.EntryPrice <= 0 {
+		log.Printf("⚠️  Invalid entry price for %s: %.2f", signal.Symbol, signal.EntryPrice)
+		return
+	}
+
 	// Take Profit Hit
 	if currentPrice >= signal.TakeProfit {
 		if !signal.TPAlertSent {
 			pnl := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
+			// Clamp PnL to reasonable bounds
+			pnl = service.ClampFloat64(pnl, -100, 10000)
 			sm.closeSignal(signal, "TP_HIT", currentPrice, pnl)
 			// Pass update flag to strictly track alert status (although clodeSignal handles status)
 			sm.sendTPAlert(signal, currentPrice, pnl)
@@ -132,6 +140,8 @@ func (sm *SignalMonitor) checkLongSignal(signal *model.Signal, currentPrice floa
 	if currentPrice <= signal.StopLoss {
 		if !signal.SLAlertSent {
 			pnl := ((currentPrice - signal.EntryPrice) / signal.EntryPrice) * 100
+			// Clamp PnL to reasonable bounds
+			pnl = service.ClampFloat64(pnl, -100, 10000)
 			sm.closeSignal(signal, "SL_HIT", currentPrice, pnl)
 			sm.sendSLAlert(signal, currentPrice, pnl)
 		}
@@ -157,10 +167,18 @@ func (sm *SignalMonitor) checkLongSignal(signal *model.Signal, currentPrice floa
 
 // checkShortSignal checks SHORT signal conditions
 func (sm *SignalMonitor) checkShortSignal(signal *model.Signal, currentPrice float64) {
+	// Validate entry price to prevent division by zero
+	if signal.EntryPrice <= 0 {
+		log.Printf("⚠️  Invalid entry price for %s: %.2f", signal.Symbol, signal.EntryPrice)
+		return
+	}
+
 	// Take Profit Hit (price goes down)
 	if currentPrice <= signal.TakeProfit {
 		if !signal.TPAlertSent {
 			pnl := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
+			// Clamp PnL to reasonable bounds
+			pnl = service.ClampFloat64(pnl, -100, 10000)
 			sm.closeSignal(signal, "TP_HIT", currentPrice, pnl)
 			sm.sendTPAlert(signal, currentPrice, pnl)
 		}
@@ -171,6 +189,8 @@ func (sm *SignalMonitor) checkShortSignal(signal *model.Signal, currentPrice flo
 	if currentPrice >= signal.StopLoss {
 		if !signal.SLAlertSent {
 			pnl := ((signal.EntryPrice - currentPrice) / signal.EntryPrice) * 100
+			// Clamp PnL to reasonable bounds
+			pnl = service.ClampFloat64(pnl, -100, 10000)
 			sm.closeSignal(signal, "SL_HIT", currentPrice, pnl)
 			sm.sendSLAlert(signal, currentPrice, pnl)
 		}

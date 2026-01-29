@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"log"
 	"sync"
 
@@ -44,27 +45,35 @@ func (p *WorkerPool) Start() {
 
 // worker processes jobs from the jobs channel
 func (p *WorkerPool) worker(id int) {
+	// Critical: Add panic recovery to prevent entire pool crash
+	defer service.RecoverAndLog(fmt.Sprintf("Worker %d", id))
 	defer p.wg.Done()
 
 	for symbol := range p.jobs {
 		log.Printf("⏳ [Worker %d] Processing %s...", id, symbol)
-		signal, price, err := p.strategy.EvaluateSymbol(symbol)
 
-		if err != nil {
-			log.Printf("⚠️  [Worker %d] Error evaluating %s: %v", id, symbol, err)
-			continue
-		}
+		// Add individual job panic recovery
+		func() {
+			defer service.RecoverAndLog(fmt.Sprintf("Worker %d processing %s", id, symbol))
 
-		// Always report result (for Price monitoring)
-		p.results <- ScanResult{
-			Signal: signal,
-			Symbol: symbol,
-			Price:  price,
-		}
+			signal, price, err := p.strategy.EvaluateSymbol(symbol)
 
-		if signal != nil {
-			log.Printf("📈 [Worker %d] Signal found for %s!", id, symbol)
-		}
+			if err != nil {
+				log.Printf("⚠️  [Worker %d] Error evaluating %s: %v", id, symbol, err)
+				return
+			}
+
+			// Always report result (for Price monitoring)
+			p.results <- ScanResult{
+				Signal: signal,
+				Symbol: symbol,
+				Price:  price,
+			}
+
+			if signal != nil {
+				log.Printf("📈 [Worker %d] Signal found for %s!", id, symbol)
+			}
+		}()
 	}
 	log.Printf("✅ [Worker %d] Completed all jobs", id)
 }

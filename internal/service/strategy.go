@@ -118,7 +118,17 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	closes15m, highs15m, lows15m, _ := extractSeries(klines15m)
 	closes5m, highs5m, lows5m, volumes5m := extractSeries(klines5m)
 
+	// Validate we have sufficient data
+	if len(closes5m) == 0 || len(closes4h) == 0 || len(closes1h) == 0 || len(closes15m) == 0 {
+		log.Printf("⚠️  [Strategy] %s - Insufficient price data after extraction", symbol)
+		return nil, 0, nil
+	}
+
 	currentPrice := closes5m[len(closes5m)-1]
+	if !ValidatePrice(currentPrice) {
+		log.Printf("⚠️  [Strategy] %s - Invalid current price: %v", symbol, currentPrice)
+		return nil, 0, nil
+	}
 
 	// ========================================
 	// STEP 1.3: MARKET STRUCTURE ANALYSIS (NEW)
@@ -135,7 +145,9 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	var pivotPoints internalmath.PivotPoints
 	if len(klines1d) >= 2 {
 		prevDay := klines1d[len(klines1d)-2]
-		pivotPoints = internalmath.CalculateStandardPivots(prevDay.High, prevDay.Low, prevDay.Close)
+		if ValidatePrice(prevDay.High) && ValidatePrice(prevDay.Low) && ValidatePrice(prevDay.Close) {
+			pivotPoints = internalmath.CalculateStandardPivots(prevDay.High, prevDay.Low, prevDay.Close)
+		}
 	}
 	nearestPivotPrice, nearestPivotName := internalmath.FindNearestPivotLevel(currentPrice, pivotPoints)
 
@@ -148,6 +160,10 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 		return nil, currentPrice, nil
 	}
 	ema50Value := ema50_4h[len(ema50_4h)-1]
+	if !ValidateFloat64(ema50Value) {
+		log.Printf("⚠️  [Strategy] %s - Invalid EMA50 value", symbol)
+		return nil, currentPrice, nil
+	}
 
 	fibTrend := "UP"
 	if currentPrice < ema50Value {
@@ -172,9 +188,15 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	rsi15mVec := indicator.CalculateRSI(closes15m, 14) // Vector for advanced analysis
 	rsi15m := 0.0
 	if len(rsi15mVec) > 0 {
-		rsi15m = rsi15mVec[len(rsi15mVec)-1]
+		rsi15m = SafeGetLastElement(rsi15mVec, 0.0)
 	}
 	rsi5m := indicator.GetLastRSI(closes5m, 14)
+
+	// Validate RSI values
+	if !ValidateFloat64(rsi4h) || !ValidateFloat64(rsi1h) {
+		log.Printf("⚠️  [Strategy] %s - Invalid RSI values", symbol)
+		return nil, currentPrice, nil
+	}
 
 	// ADX - Trend strength
 	log.Printf("Debug: Calculating ADX for %s...", symbol)
@@ -194,8 +216,15 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 
 	// Volume
 	avgVol := calculateAverage(volumes5m)
+	if len(volumes5m) == 0 {
+		log.Printf("⚠️  [Strategy] %s - No volume data", symbol)
+		return nil, currentPrice, nil
+	}
 	currentVol := volumes5m[len(volumes5m)-1]
-	volRatio := currentVol / avgVol
+	volRatio := 1.0
+	if avgVol > 0 {
+		volRatio = currentVol / avgVol
+	}
 
 	// Order Flow
 	log.Printf("Debug: Calculating Order Flow for %s...", symbol)
@@ -298,8 +327,21 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	// ========================================
 	// STEP 6: KEY LEVEL PROXIMITY CHECK
 	// ========================================
-	pivotProximity := math.Abs(currentPrice-nearestPivotPrice) / currentPrice * 100
-	fibProximity := math.Abs(currentPrice-nearestFibPrice) / currentPrice * 100
+	pivotProximity := 100.0 // Default to far away
+	if currentPrice > 0 {
+		pivotProximity = math.Abs(currentPrice-nearestPivotPrice) / currentPrice * 100
+		if !ValidateFloat64(pivotProximity) {
+			pivotProximity = 100.0
+		}
+	}
+
+	fibProximity := 100.0 // Default to far away
+	if currentPrice > 0 {
+		fibProximity = math.Abs(currentPrice-nearestFibPrice) / currentPrice * 100
+		if !ValidateFloat64(fibProximity) {
+			fibProximity = 100.0
+		}
+	}
 
 	// Must be within 2% of a key level for entry
 	// EXCEPTION: If score is Premium (>= 90), we allow slightly wider entry
@@ -335,7 +377,16 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	tp2Percent := 9.0 / 100.0
 
 	// Adjust based on ATR volatility
-	atrPercent := (atr1h / currentPrice) * 100
+	atrPercent := 0.0
+	if currentPrice > 0 && ValidateFloat64(atr1h) {
+		atrPercent = (atr1h / currentPrice) * 100
+		if !ValidateFloat64(atrPercent) {
+			atrPercent = 2.0 // Default moderate volatility
+		}
+	} else {
+		atrPercent = 2.0 // Default moderate volatility
+	}
+
 	if atrPercent > 3.0 {
 		// High volatility - use even wider stops/targets
 		slPercent = 4.5 / 100.0

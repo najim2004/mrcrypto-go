@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"mrcrypto-go/internal/config"
 	"mrcrypto-go/internal/loader"
@@ -13,6 +14,9 @@ import (
 )
 
 func main() {
+	// Global panic recovery
+	defer service.RecoverAndLog("main")
+
 	// Load configuration
 	config.Load()
 
@@ -60,16 +64,30 @@ func main() {
 	)
 
 	// Handle graceful shutdown
+	shutdownChan := make(chan bool, 1)
 	go func() {
+		defer service.RecoverAndLog("shutdown handler")
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 
 		log.Println("\n🛑 Received shutdown signal...")
+
+		// Graceful shutdown with timeout
+		shutdownTimer := time.NewTimer(30 * time.Second)
+		go func() {
+			<-shutdownTimer.C
+			log.Println("⚠️  Shutdown timeout - forcing exit")
+			os.Exit(1)
+		}()
+
 		databaseService.Close()
+		shutdownTimer.Stop()
+		shutdownChan <- true
 		os.Exit(0)
 	}()
 
 	// Start the loader (blocks indefinitely)
+	log.Println("🚀 Bot is now running...")
 	loaderService.Start()
 }

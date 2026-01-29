@@ -73,6 +73,9 @@ func (l *Loader) Start() {
 
 // poll executes one complete polling cycle
 func (l *Loader) poll() {
+	// Critical: Add panic recovery to prevent bot crash
+	defer service.RecoverAndLog("Loader.poll")
+
 	l.isPolling = true
 	defer func() {
 		l.isPolling = false
@@ -153,11 +156,24 @@ func (l *Loader) poll() {
 		return
 	}
 
+	// Validate AI results length matches signals
+	if len(aiResults) != len(validForAI) {
+		log.Printf("⚠️  AI validation mismatch: got %d results for %d signals", len(aiResults), len(validForAI))
+		// Adjust to minimum to prevent out of bounds
+		minLen := len(aiResults)
+		if len(validForAI) < minLen {
+			minLen = len(validForAI)
+		}
+		validForAI = validForAI[:minLen]
+	}
+
 	// Process validated signals
 	log.Printf("⏳ [Loader] Processing %d AI validation results...", len(aiResults))
 	validSignals := 0
 	for idx, signal := range validForAI {
+		// Double-check bounds (defensive programming)
 		if idx >= len(aiResults) {
+			log.Printf("⚠️  %s - Skipped (AI result missing at index %d)", signal.Symbol, idx)
 			continue
 		}
 

@@ -50,18 +50,46 @@ func (s *BinanceService) GetKlines(symbol, interval string, limit int) ([]model.
 	}
 
 	klines := make([]model.Kline, 0, len(klineData))
-	for _, k := range klineData {
+	for idx, k := range klineData {
+		// Validate array length
 		if len(k) < 11 {
+			log.Printf("⚠️  [Binance API] Skipping invalid kline at index %d: insufficient fields (%d/11)", idx, len(k))
 			continue
 		}
 
-		openTime, _ := k[0].(float64)
-		open, _ := strconv.ParseFloat(k[1].(string), 64)
-		high, _ := strconv.ParseFloat(k[2].(string), 64)
-		low, _ := strconv.ParseFloat(k[3].(string), 64)
-		closePrice, _ := strconv.ParseFloat(k[4].(string), 64)
-		volume, _ := strconv.ParseFloat(k[5].(string), 64)
-		closeTime, _ := k[6].(float64)
+		// Safe type assertions with validation
+		openTime := SafeTypeAssertFloat(k[0], 0)
+		openStr := SafeTypeAssertString(k[1], "0")
+		highStr := SafeTypeAssertString(k[2], "0")
+		lowStr := SafeTypeAssertString(k[3], "0")
+		closeStr := SafeTypeAssertString(k[4], "0")
+		volumeStr := SafeTypeAssertString(k[5], "0")
+		closeTime := SafeTypeAssertFloat(k[6], 0)
+
+		// Parse strings to floats with error handling
+		open, err1 := strconv.ParseFloat(openStr, 64)
+		high, err2 := strconv.ParseFloat(highStr, 64)
+		low, err3 := strconv.ParseFloat(lowStr, 64)
+		closePrice, err4 := strconv.ParseFloat(closeStr, 64)
+		volume, err5 := strconv.ParseFloat(volumeStr, 64)
+
+		// Check for parse errors
+		if err1 != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
+			log.Printf("⚠️  [Binance API] Skipping kline at index %d: parse error", idx)
+			continue
+		}
+
+		// Validate prices are reasonable
+		if !ValidatePrice(open) || !ValidatePrice(high) || !ValidatePrice(low) || !ValidatePrice(closePrice) {
+			log.Printf("⚠️  [Binance API] Skipping kline at index %d: invalid price values", idx)
+			continue
+		}
+
+		// Validate OHLC logic: High >= Low, High >= Open/Close, Low <= Open/Close
+		if high < low || high < open || high < closePrice || low > open || low > closePrice {
+			log.Printf("⚠️  [Binance API] Skipping kline at index %d: invalid OHLC relationship", idx)
+			continue
+		}
 
 		klines = append(klines, model.Kline{
 			OpenTime:  int64(openTime),
@@ -72,6 +100,10 @@ func (s *BinanceService) GetKlines(symbol, interval string, limit int) ([]model.
 			Volume:    volume,
 			CloseTime: int64(closeTime),
 		})
+	}
+
+	if len(klines) == 0 {
+		return nil, fmt.Errorf("no valid klines after parsing")
 	}
 
 	log.Printf("✅ [Binance API] Successfully fetched %d %s klines for %s", len(klines), interval, symbol)
