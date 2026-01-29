@@ -18,13 +18,15 @@ type SignalMonitor struct {
 	collection *mongo.Collection
 	binance    *service.BinanceService
 	telegram   *service.TelegramService
+	tracker    *service.SignalTracker
 }
 
-func NewSignalMonitor(db *mongo.Database, binance *service.BinanceService, telegram *service.TelegramService) *SignalMonitor {
+func NewSignalMonitor(db *mongo.Database, binance *service.BinanceService, telegram *service.TelegramService, tracker *service.SignalTracker) *SignalMonitor {
 	return &SignalMonitor{
 		collection: db.Collection("signals"),
 		binance:    binance,
 		telegram:   telegram,
+		tracker:    tracker,
 	}
 }
 
@@ -256,6 +258,12 @@ func (sm *SignalMonitor) closeSignal(signal *model.Signal, reason string, exitPr
 		log.Printf("⚠️ Failed to close signal %s: %v", signal.Symbol, updateErr)
 	} else {
 		log.Printf("🔒 Closed %s signal: %s (PnL: %.2f%%)", signal.Symbol, reason, pnl)
+
+		// [NEW] Feedback Loop: Record outcome to Signal Tracker
+		if sm.tracker != nil {
+			won := pnl > 0
+			sm.tracker.RecordSignalOutcome(signal, won)
+		}
 	}
 }
 

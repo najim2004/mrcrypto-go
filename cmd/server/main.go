@@ -23,9 +23,9 @@ func main() {
 	log.Println("🔧 Initializing services...")
 
 	// Initialize services
-	// Initialize services
 	binanceService := service.NewBinanceService()
-	strategyService := service.NewStrategyService(binanceService)
+	signalTracker := service.NewSignalTracker()
+	strategyService := service.NewStrategyService(binanceService, signalTracker)
 	aiService := service.NewAIService()
 
 	// Create Database service first as SymbolManager needs it
@@ -48,6 +48,7 @@ func main() {
 		databaseService.GetDB(),
 		binanceService,
 		telegramService,
+		signalTracker,
 	)
 
 	log.Println("✅ All services initialized successfully")

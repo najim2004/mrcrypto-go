@@ -98,6 +98,15 @@ type TechnicalContext struct {
 	TradingGuidance   string `json:"trading_guidance" bson:"trading_guidance"`       // Dynamic advice
 	RiskWarning       string `json:"risk_warning" bson:"risk_warning"`               // Any warnings
 	NewsCheckReminder bool   `json:"news_check_reminder" bson:"news_check_reminder"` // Remind to check news
+
+	// NEW: Advanced Features
+	CVDValue         float64 `json:"cvd_value" bson:"cvd_value"`                 // Cumulative Volume Delta
+	CVDTrend         float64 `json:"cvd_trend" bson:"cvd_trend"`                 // CVD trend direction
+	CVDDivergence    string  `json:"cvd_divergence" bson:"cvd_divergence"`       // Bullish/Bearish CVD divergence
+	OrderBookSignal  string  `json:"order_book_signal" bson:"order_book_signal"` // Buy/Sell pressure from order book
+	OrderBookImbalance float64 `json:"order_book_imbalance" bson:"order_book_imbalance"` // Bid-Ask imbalance %
+	PerpSpotPremium  float64 `json:"perp_spot_premium" bson:"perp_spot_premium"` // Perp vs Spot premium/discount %
+	PerpSpotSentiment string  `json:"perp_spot_sentiment" bson:"perp_spot_sentiment"` // Market sentiment from perp-spot
 }
 
 // Signal represents a trading signal

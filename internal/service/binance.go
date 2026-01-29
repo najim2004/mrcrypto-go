@@ -146,3 +146,171 @@ func (s *BinanceService) GetAllSymbols() ([]string, error) {
 
 	return symbols, nil
 }
+
+// ========================================
+// ORDER BOOK DEPTH ANALYSIS
+// ========================================
+
+// OrderBookDepth represents bid/ask volume analysis
+type OrderBookDepth struct {
+	BidVolume float64
+	AskVolume float64
+	Imbalance float64 // (Bid - Ask) / (Bid + Ask) * 100
+	Signal    string  // "Buy Pressure" / "Sell Pressure" / "Balanced"
+}
+
+// DepthResponse represents Binance order book depth response
+type DepthResponse struct {
+	Bids [][]interface{} `json:"bids"`
+	Asks [][]interface{} `json:"asks"`
+}
+
+// GetOrderBookDepth fetches and analyzes order book depth
+// limit: 100 for detailed analysis, 500 for comprehensive (max allowed by Binance)
+func (s *BinanceService) GetOrderBookDepth(symbol string, limit int) (*OrderBookDepth, error) {
+	url := fmt.Sprintf("%s/api/v3/depth?symbol=%s&limit=%d", s.baseURL, symbol, limit)
+
+	resp, err := s.client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch depth: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("binance API error: %s - %s", resp.Status, string(body))
+	}
+
+	var depthData DepthResponse
+	if err := json.NewDecoder(resp.Body).Decode(&depthData); err != nil {
+		return nil, fmt.Errorf("failed to decode depth: %w", err)
+	}
+
+	// Calculate total bid and ask volume
+	bidVolume := 0.0
+	askVolume := 0.0
+
+	for _, bid := range depthData.Bids {
+		if len(bid) >= 2 {
+			qty := SafeTypeAssertString(bid[1], "0")
+			vol, _ := strconv.ParseFloat(qty, 64)
+			bidVolume += vol
+		}
+	}
+
+	for _, ask := range depthData.Asks {
+		if len(ask) >= 2 {
+			qty := SafeTypeAssertString(ask[1], "0")
+			vol, _ := strconv.ParseFloat(qty, 64)
+			askVolume += vol
+		}
+	}
+
+	// Calculate imbalance
+	totalVolume := bidVolume + askVolume
+	imbalance := 0.0
+	signal := "Balanced"
+
+	if totalVolume > 0 {
+		imbalance = ((bidVolume - askVolume) / totalVolume) * 100
+
+		if imbalance > 20 {
+			signal = "Strong Buy Pressure"
+		} else if imbalance > 10 {
+			signal = "Buy Pressure"
+		} else if imbalance < -20 {
+			signal = "Strong Sell Pressure"
+		} else if imbalance < -10 {
+			signal = "Sell Pressure"
+		}
+	}
+
+	log.Printf("📚 [Order Book] %s - Bid: %.2f | Ask: %.2f | Imbalance: %.1f%% (%s)",
+		symbol, bidVolume, askVolume, imbalance, signal)
+
+	return &OrderBookDepth{
+		BidVolume: bidVolume,
+		AskVolume: askVolume,
+		Imbalance: imbalance,
+		Signal:    signal,
+	}, nil
+}
+
+// ========================================
+// PERP VS SPOT DIVERGENCE
+// ========================================
+
+// PerpSpotDivergence represents futures vs spot price comparison
+type PerpSpotDivergence struct {
+	PerpPrice float64
+	SpotPrice float64
+	Premium   float64 // (Perp - Spot) / Spot * 100
+	Sentiment string  // "Overheated Longs" / "Neutral" / "Bearish Discount"
+}
+
+// TickerPriceResponse represents Binance ticker price response
+type TickerPriceResponse struct {
+	Symbol string `json:"symbol"`
+	Price  string `json:"price"`
+}
+
+// GetSpotPrice fetches current spot price
+func (s *BinanceService) GetSpotPrice(symbol string) (float64, error) {
+	url := fmt.Sprintf("%s/api/v3/ticker/price?symbol=%s", s.baseURL, symbol)
+
+	resp, err := s.client.Get(url)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch spot price: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("binance API error: %s - %s", resp.Status, string(body))
+	}
+
+	var tickerData TickerPriceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tickerData); err != nil {
+		return 0, fmt.Errorf("failed to decode spot price: %w", err)
+	}
+
+	price, err := strconv.ParseFloat(tickerData.Price, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse spot price: %w", err)
+	}
+
+	return price, nil
+}
+
+// GetPerpSpotDivergence calculates perpetual vs spot price divergence
+func (s *BinanceService) GetPerpSpotDivergence(perpSymbol string, perpPrice float64) (*PerpSpotDivergence, error) {
+	// Convert BTCUSDT (perp) to BTCUSDT (spot) - same symbol for Binance
+	spotPrice, err := s.GetSpotPrice(perpSymbol)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate premium/discount
+	premium := ((perpPrice - spotPrice) / spotPrice) * 100
+	sentiment := "Neutral"
+
+	if premium > 0.5 {
+		sentiment = "Overheated Longs"
+	} else if premium > 0.2 {
+		sentiment = "Bullish Premium"
+	} else if premium < -0.5 {
+		sentiment = "Bearish Discount"
+	} else if premium < -0.2 {
+		sentiment = "Oversold Shorts"
+	}
+
+	log.Printf("💱 [Perp-Spot] %s - Perp: $%.2f | Spot: $%.2f | Premium: %.3f%% (%s)",
+		perpSymbol, perpPrice, spotPrice, premium, sentiment)
+
+	return &PerpSpotDivergence{
+		PerpPrice: perpPrice,
+		SpotPrice: spotPrice,
+		Premium:   premium,
+		Sentiment: sentiment,
+	}, nil
+}

@@ -13,11 +13,13 @@ import (
 
 type StrategyService struct {
 	binance *BinanceService
+	tracker *SignalTracker
 }
 
-func NewStrategyService(binance *BinanceService) *StrategyService {
+func NewStrategyService(binance *BinanceService, tracker *SignalTracker) *StrategyService {
 	return &StrategyService{
 		binance: binance,
+		tracker: tracker,
 	}
 }
 
@@ -135,6 +137,29 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	// ========================================
 	structureInfo := indicator.AnalyzeMarketStructure(klines1h, 30)
 	log.Printf("📐 [Strategy] %s - Structure: %s", symbol, structureInfo.Structure)
+
+	// ========================================
+	// STEP 1.4: ADVANCED FEATURES
+	// ========================================
+	// CVD - Cumulative Volume Delta (using 15m for entry timing)
+	cvdValue, cvdTrend := indicator.GetLastCVDTrend(klines15m, 20)
+	cvdDivergence := indicator.GetCVDDivergence(klines15m, 30)
+	log.Printf("📊 [CVD] %s - Value: %.2f | Trend: %.2f | Divergence: %s",
+		symbol, cvdValue, cvdTrend, cvdDivergence)
+
+	// Order Book Depth Analysis (limit 500 for comprehensive data)
+	orderBookDepth, err := s.binance.GetOrderBookDepth(symbol, 500)
+	if err != nil {
+		log.Printf("⚠️  [Strategy] %s - Failed to fetch order book: %v", symbol, err)
+		orderBookDepth = &OrderBookDepth{Signal: "Unknown", Imbalance: 0}
+	}
+
+	// Perp vs Spot Divergence
+	perpSpotDiv, err := s.binance.GetPerpSpotDivergence(symbol, currentPrice)
+	if err != nil {
+		log.Printf("⚠️  [Strategy] %s - Failed to fetch perp-spot divergence: %v", symbol, err)
+		perpSpotDiv = &PerpSpotDivergence{Sentiment: "Unknown", Premium: 0}
+	}
 
 	// ========================================
 	// STEP 2: KEY LEVELS (Before anything else)
@@ -306,6 +331,58 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 	// Market structure alignment
 	structureScore := indicator.GetStructureScore(structureInfo, signalDir)
 	score += structureScore
+
+	// Advanced Features Scoring
+	advancedScore := 0
+
+	// CVD Alignment (+10 for trend match, +15 for divergence)
+	if signalDir == "LONG" && cvdTrend > 0 {
+		advancedScore += 10
+	} else if signalDir == "SHORT" && cvdTrend < 0 {
+		advancedScore += 10
+	}
+	if (signalDir == "LONG" && cvdDivergence == "Bullish CVD Divergence") ||
+		(signalDir == "SHORT" && cvdDivergence == "Bearish CVD Divergence") {
+		advancedScore += 15
+	}
+
+	// Order Book Imbalance (+12 for strong alignment, -15 for opposite)
+	if signalDir == "LONG" {
+		if orderBookDepth.Imbalance > 30 {
+			advancedScore += 12
+		} else if orderBookDepth.Imbalance > 15 {
+			advancedScore += 6
+		} else if orderBookDepth.Imbalance < -15 {
+			advancedScore -= 15 // Strong sell pressure on LONG = bad
+		}
+	} else { // SHORT
+		if orderBookDepth.Imbalance < -30 {
+			advancedScore += 12
+		} else if orderBookDepth.Imbalance < -15 {
+			advancedScore += 6
+		} else if orderBookDepth.Imbalance > 15 {
+			advancedScore -= 15 // Strong buy pressure on SHORT = bad
+		}
+	}
+
+	// Perp-Spot Divergence (+5 for neutral, -12 for overheated)
+	if signalDir == "LONG" {
+		if perpSpotDiv.Premium > 0.5 {
+			advancedScore -= 12 // Overheated longs
+		} else if perpSpotDiv.Premium < 0.2 && perpSpotDiv.Premium > -0.2 {
+			advancedScore += 5 // Neutral = good
+		}
+	} else { // SHORT
+		if perpSpotDiv.Premium < -0.5 {
+			advancedScore -= 12 // Oversold shorts
+		} else if perpSpotDiv.Premium > -0.2 && perpSpotDiv.Premium < 0.2 {
+			advancedScore += 5 // Neutral = good
+		}
+	}
+
+	score += advancedScore
+
+	log.Printf("📊 [Advanced Scoring] %s - Total Advanced: %+d", symbol, advancedScore)
 
 	// Clamp score to 0-100
 	if score < 0 {
@@ -538,11 +615,33 @@ func (s *StrategyService) EvaluateSymbol(symbol string) (*model.Signal, float64,
 		TradingGuidance:   tradingGuidance,
 		RiskWarning:       allWarnings,
 		NewsCheckReminder: true, // Always remind to check news
+		// NEW: Advanced Features
+		CVDValue:           cvdValue,
+		CVDTrend:           cvdTrend,
+		CVDDivergence:      cvdDivergence,
+		OrderBookSignal:    orderBookDepth.Signal,
+		OrderBookImbalance: orderBookDepth.Imbalance,
+		PerpSpotPremium:    perpSpotDiv.Premium,
+		PerpSpotSentiment:  perpSpotDiv.Sentiment,
 	}
 
 	signalType := model.SignalTypeLong
 	if signalDir == "SHORT" {
 		signalType = model.SignalTypeShort
+	}
+
+	// Create temporary signal for pattern checking
+	tempSignalForCheck := &model.Signal{
+		Symbol:           symbol,
+		Type:             signalType,
+		TechnicalContext: techContext,
+	}
+
+	// [NEW] Signal Performance Tracker Check
+	// If pattern has poor historical performance (<40% win rate), disable data
+	if s.tracker != nil && !s.tracker.IsPatternEnabled(tempSignalForCheck) {
+		log.Printf("🚫 [Strategy] %s - Pattern DISABLED (poor historical performance)", symbol)
+		return nil, currentPrice, nil
 	}
 
 	signal := &model.Signal{

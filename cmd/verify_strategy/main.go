@@ -16,8 +16,10 @@ func main() {
 	log.Println("🧪 Starting Strategy Verification...")
 
 	// Initialize services
+	// Initialize services
 	binanceService := service.NewBinanceService()
-	strategyService := service.NewStrategyService(binanceService)
+	signalTracker := service.NewSignalTracker()
+	strategyService := service.NewStrategyService(binanceService, signalTracker)
 
 	symbol := "ETHUSDT"
 	log.Printf("🔍 Evaluating %s...", symbol)
