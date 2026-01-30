@@ -36,10 +36,8 @@ func (sm *SignalMonitor) CheckActiveSignalsAgainstPrices(prices map[string]float
 	defer cancel()
 
 	// Find all active signals created TODAY that haven't had their final alert sent
-	today := time.Now().Truncate(24 * time.Hour)
 	filter := bson.M{
-		"status":     "ACTIVE",
-		"created_at": bson.M{"$gte": today},
+		"status": "ACTIVE",
 		// Only monitor signals that haven't hit TP or SL yet
 		// This prevents race condition where signal is re-monitored before DB update completes
 		"$and": []bson.M{

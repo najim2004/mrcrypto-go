@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"mrcrypto-go/internal/config"
@@ -104,28 +105,42 @@ func (s *DatabaseService) CheckCooldown(symbol string, duration time.Duration) b
 }
 
 // CheckDuplicateActiveSignal checks if an active signal already exists for symbol+type
-func (s *DatabaseService) CheckDuplicateActiveSignal(symbol string, signalType model.SignalType) bool {
+// Returns TRUE if duplicate (should skip), FALSE if allowed (e.g. price difference > 1.5%)
+func (s *DatabaseService) CheckDuplicateActiveSignal(symbol string, signalType model.SignalType, newEntryPrice float64) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Find the latest active signal for this symbol and type
 	filter := bson.M{
 		"symbol": symbol,
 		"type":   signalType,
 		"status": "ACTIVE",
 	}
+	// Sort by newest first to compare with latest entry
+	opts := options.FindOne().SetSort(bson.D{{Key: "created_at", Value: -1}})
 
-	count, err := s.collection.CountDocuments(ctx, filter)
+	var existingSignal model.Signal
+	err := s.collection.FindOne(ctx, filter, opts).Decode(&existingSignal)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return false // No active signal found, safe to proceed
+		}
 		log.Printf("⚠️  Error checking duplicate for %s %s: %v", symbol, signalType, err)
-		return false
+		return false // Assume safe on error to avoid blocking valid signals
 	}
 
-	if count > 0 {
-		log.Printf("⏭️  %s %s - Active signal already exists (duplicate prevented)", symbol, signalType)
-		return true
+	// Active signal exists. Check price difference.
+	// Logic: If price has moved significantly (> 1.5%), allow "Scaling In"
+	priceDiff := math.Abs(existingSignal.EntryPrice - newEntryPrice)
+	percentDiff := (priceDiff / existingSignal.EntryPrice) * 100
+
+	if percentDiff > 1.5 {
+		log.Printf("✅ %s %s - Scaling In Allowed (Price diff: %.2f%% from prev entry)", symbol, signalType, percentDiff)
+		return false // Not a duplicate (conceptually), allow new signal
 	}
 
-	return false
+	log.Printf("⏭️  %s %s - Active signal exists at similar price (%.2f%% diff) - Duplicate prevented", symbol, signalType, percentDiff)
+	return true
 }
 
 // Close closes the database connection
@@ -139,6 +154,31 @@ func (s *DatabaseService) Close() error {
 
 	log.Println("🔌 MongoDB connection closed")
 	return nil
+}
+
+// CloseAllActiveSignals closes all currently active signals (e.g. for daily cleanup)
+func (s *DatabaseService) CloseAllActiveSignals(reason string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{"status": "ACTIVE"}
+	update := bson.M{
+		"$set": bson.M{
+			"status":       "CLOSED",
+			"close_reason": reason,
+			"closed_at":    time.Now(),
+		},
+	}
+
+	result, err := s.collection.UpdateMany(ctx, filter, update)
+	if err != nil {
+		return 0, fmt.Errorf("failed to close active signals: %w", err)
+	}
+
+	if result.ModifiedCount > 0 {
+		log.Printf("🧹 [Database] Closed %d active signals (Reason: %s)", result.ModifiedCount, reason)
+	}
+	return result.ModifiedCount, nil
 }
 
 // GetDB returns the MongoDB database instance

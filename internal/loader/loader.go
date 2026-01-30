@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -61,6 +62,24 @@ func (l *Loader) Start() {
 		}
 
 		l.poll()
+	})
+
+	// Daily Cleanup Task: Run at 5:45 AM (15 mins before Asia session starts)
+	// Clears old "active" signals from the Dead Zone / prev day so new day starts fresh
+	c.AddFunc("45 5 * * *", func() {
+		log.Println("🧹 Executing Daily Cleanup Task...")
+		count, err := l.database.CloseAllActiveSignals("DAILY_CLEANUP_AUTO")
+		if err != nil {
+			log.Printf("❌ Failed to perform daily cleanup: %v", err)
+			return
+		}
+		if count > 0 {
+			log.Printf("🧹 Closed %d old signals.", count)
+			// Optional: Notify admin/channel
+			l.telegram.SendMessage(fmt.Sprintf("🧹 <b>ডেইলি ক্লিনআপ:</b> %d টি পুরানো সিগন্যাল ক্লোজ করা হয়েছে। নতুন দিনের জন্য প্রস্তুত! 🌅", count))
+		} else {
+			log.Println("🧹 No active signals to clean up.")
+		}
 	})
 
 	c.Start()
@@ -192,9 +211,8 @@ func (l *Loader) poll() {
 
 		log.Printf("✅ %s - Valid signal! AI Score: %d/100", signal.Symbol, result.Score)
 
-		// Check for duplicate active signal BEFORE saving
-		if l.database.CheckDuplicateActiveSignal(signal.Symbol, signal.Type) {
-			log.Printf("⏭️  %s %s - Skipped (duplicate active signal exists)", signal.Symbol, signal.Type)
+		// Check for duplicate active signal BEFORE saving (Pass EntryPrice for Scaling Check)
+		if l.database.CheckDuplicateActiveSignal(signal.Symbol, signal.Type, signal.EntryPrice) {
 			continue
 		}
 
